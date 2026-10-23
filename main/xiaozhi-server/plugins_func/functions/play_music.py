@@ -68,8 +68,10 @@ control_music_function_desc = {
                         "repeat_all",
                         "repeat_one",
                         "shuffle",
+                    "favorite",
+                    "unfavorite",
                     ],
-                    "description": "暂停为 pause，继续或恢复为 resume，停止为 stop，上一首为 previous，下一首、换一首或切歌为 next。顺序播放为 sequence，列表循环为 repeat_all，单曲循环为 repeat_one，随机播放为 shuffle。",
+                    "description": "暂停为 pause，继续或恢复为 resume，停止为 stop，上一首为 previous，下一首、换一首或切歌为 next。顺序播放为 sequence，列表循环为 repeat_all，单曲循环为 repeat_one，随机播放为 shuffle。收藏当前歌曲为 favorite，取消收藏为 unfavorite。",
                 }
             },
             "required": ["action"],
@@ -107,6 +109,8 @@ async def control_music(conn: "ConnectionHandler", action: str):
         "repeat_all",
         "repeat_one",
         "shuffle",
+        "favorite",
+        "unfavorite",
     }:
         return ActionResponse(
             action=Action.RESPONSE, result="无效音乐控制指令", response="不支持该音乐控制操作"
@@ -145,6 +149,29 @@ async def control_music(conn: "ConnectionHandler", action: str):
             "shuffle": "好的，已开启随机播放。",
         }[action]
         conn.logger.bind(tag=TAG).info(f"已切换音乐播放模式: {action}")
+        return ActionResponse(action=Action.RECORD, result="指令已接收", response=response)
+
+    if action in {"favorite", "unfavorite"}:
+        queue = getattr(conn, "music_queue", [])
+        index = getattr(conn, "music_queue_index", -1)
+        if not queue or index < 0 or index >= len(queue):
+            return ActionResponse(
+                action=Action.RESPONSE,
+                result="没有正在播放的网易云歌曲",
+                response="当前没有可收藏的网易云歌曲。",
+            )
+        provider = MUSIC_CACHE.get("netease_provider")
+        if provider is None:
+            provider = NeteaseCliProvider(conn.config)
+            MUSIC_CACHE["netease_provider"] = provider
+        track = queue[index]
+        if action == "favorite":
+            await provider.like_track(track)
+            response = "好的，已收藏当前歌曲。"
+        else:
+            await provider.dislike_track(track)
+            response = "好的，已取消收藏当前歌曲。"
+        conn.logger.bind(tag=TAG).info(f"已更新当前歌曲收藏状态: {action}")
         return ActionResponse(action=Action.RECORD, result="指令已接收", response=response)
 
     await conn.websocket.send(json.dumps({"type": "media", "action": action}, ensure_ascii=False))

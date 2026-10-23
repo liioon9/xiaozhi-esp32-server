@@ -109,6 +109,18 @@ class NeteaseCliProvider:
             return data
         return data.get("records", data.get("songs", []))
 
+    async def like_track(self, track):
+        encrypted_id = track.get("id")
+        if not encrypted_id:
+            raise NeteaseCliError("歌曲缺少收藏 ID")
+        await self._run_json("song", "like", "--songId", encrypted_id)
+
+    async def dislike_track(self, track):
+        encrypted_id = track.get("id")
+        if not encrypted_id:
+            raise NeteaseCliError("歌曲缺少收藏 ID")
+        await self._run_json("song", "dislike", "--songId", encrypted_id)
+
     async def resolve_play_url(self, track):
         encrypted_id = track.get("id")
         original_id = track.get("originalId")

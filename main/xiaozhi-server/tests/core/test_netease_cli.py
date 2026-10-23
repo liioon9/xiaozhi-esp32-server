@@ -110,6 +110,18 @@ class NeteaseCliProviderTest(unittest.TestCase):
         self.assertEqual(provider._run.await_count, 2)
         provider._recover_player_daemon.assert_awaited_once()
 
+    def test_like_and_dislike_use_encrypted_song_id(self):
+        response = {"success": True}
+        provider = FakeNeteaseCliProvider(self.config, response)
+
+        asyncio.run(provider.like_track({"id": "encrypted-song"}))
+        self.assertEqual(provider.arguments[:3], ("song", "like", "--songId"))
+        self.assertIn("encrypted-song", provider.arguments)
+
+        asyncio.run(provider.dislike_track({"id": "encrypted-song"}))
+        self.assertEqual(provider.arguments[:3], ("song", "dislike", "--songId"))
+        self.assertIn("encrypted-song", provider.arguments)
+
 
 if __name__ == "__main__":
     unittest.main()
