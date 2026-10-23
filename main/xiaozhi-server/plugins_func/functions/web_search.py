@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import httpx
 from config.logger import setup_logging
 from plugins_func.register import (
@@ -149,6 +151,67 @@ async def _search_serply(api_key: str, query: str, max_results: int) -> str:
     return "\n".join(lines)
 
 
+async def _search_aliyun(
+    api_key: str,
+    query: str,
+    max_results: int,
+    host: str,
+    workspace_name: str = "default",
+    service_id: str = "ops-web-search-001",
+) -> str:
+    """调用阿里云AI搜索开放平台联网搜索API"""
+    url = (
+        f"{host.rstrip('/')}"
+        f"/v3/openapi/workspaces/{quote(workspace_name, safe='')}"
+        f"/web-search/{quote(service_id, safe='')}"
+    )
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "query": query,
+        "query_rewrite": True,
+        "top_k": max_results,
+        "content_type": "snippet",
+        "way": "pro",
+    }
+    logger.bind(tag=TAG).debug(f"阿里云联网搜索请求 | URL: {url} | payload: {payload}")
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=3.0)) as client:
+        response = await client.post(url, json=payload, headers=headers)
+    data = response.json()
+    logger.bind(tag=TAG).debug(
+        f"阿里云联网搜索响应 | status: {response.status_code}"
+    )
+
+    if response.status_code != 200 or data.get("code"):
+        logger.bind(tag=TAG).error(
+            "阿里云联网搜索失败 | "
+            f"status: {response.status_code} | code: {data.get('code', '')}"
+        )
+        return "联网搜索请求失败，请检查阿里云联网搜索配置。"
+
+    results = data.get("result", {}).get("search_result", [])
+    if not results:
+        return "未找到相关搜索结果。"
+
+    lines = ["【联网搜索结果】"]
+    for i, item in enumerate(results[:max_results], 1):
+        title = item.get("title", "无标题")
+        link = item.get("link", "")
+        snippet = item.get("snippet") or item.get("content", "")
+        published_time = item.get("meta_info", {}).get("publishedTime", "")
+        lines.append(f"{i}. 标题：{title}")
+        if link:
+            lines.append(f"   链接：{link}")
+        if published_time:
+            lines.append(f"   发布时间：{published_time}")
+        if snippet:
+            lines.append(f"   摘要：{snippet}")
+
+    return "\n".join(lines)
+
+
 @register_function("web_search", WEB_SEARCH_FUNCTION_DESC, ToolType.SYSTEM_CTL)
 async def web_search(conn: "ConnectionHandler", query: str = None):
     logger.bind(tag=TAG).info(f"web_search 被调用 | query={query}")
@@ -175,6 +238,22 @@ async def web_search(conn: "ConnectionHandler", query: str = None):
             result_text = await _search_tavily(api_key, query, max_results)
         elif provider == "serply":
             result_text = await _search_serply(api_key, query, max_results)
+        elif provider == "aliyun":
+            host = web_search_config.get("host", "").strip()
+            if not host:
+                return ActionResponse(
+                    Action.REQLLM,
+                    "阿里云联网搜索未配置服务接入地址，请填写host。",
+                    None,
+                )
+            result_text = await _search_aliyun(
+                api_key,
+                query,
+                max_results,
+                host,
+                web_search_config.get("workspace_name") or "default",
+                web_search_config.get("service_id") or "ops-web-search-001",
+            )
         else:
             return ActionResponse(
                 Action.REQLLM,
