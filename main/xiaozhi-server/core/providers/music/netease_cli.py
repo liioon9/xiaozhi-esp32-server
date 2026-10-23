@@ -88,13 +88,18 @@ class NeteaseCliProvider:
 
     async def daily(self, limit=30):
         payload = await self._run_json("recommend", "daily", "--limit", limit)
-        return payload.get("data", [])
+        return self._extract_tracks(payload)
 
-    async def favorite_tracks(self, limit=100):
-        favorite = await self._run_json("user", "favorite")
-        playlist_id = favorite.get("data", {}).get("id")
+    async def favorite_playlist_id(self):
+        payload = await self._run_json("user", "favorite")
+        data = payload.get("data", {})
+        playlist_id = data.get("id") or data.get("playlistId")
         if not playlist_id:
             raise NeteaseCliError("没有获取到红心歌单")
+        return playlist_id
+
+    async def favorite_tracks(self, limit=100):
+        playlist_id = await self.favorite_playlist_id()
 
         tracks = await self._run_json(
             "playlist",
@@ -108,6 +113,46 @@ class NeteaseCliProvider:
         if isinstance(data, list):
             return data
         return data.get("records", data.get("songs", []))
+
+    async def artist_tracks(self, artist_id, limit=30):
+        payload = await self._run_json(
+            "artist", "songs", "--artistId", artist_id, "--limit", limit
+        )
+        return self._extract_tracks(payload)
+
+    async def heartbeat(self, playlist_id, song_id, limit=30):
+        payload = await self._run_json(
+            "recommend",
+            "heartbeat",
+            "--playlistId",
+            playlist_id,
+            "--songId",
+            song_id,
+            "--count",
+            limit,
+        )
+        return self._extract_tracks(payload)
+
+    @staticmethod
+    def _extract_tracks(payload):
+        data = payload.get("data", [])
+        if isinstance(data, list):
+            return data
+        if not isinstance(data, dict):
+            return []
+        for key in ("records", "songs", "tracks", "list"):
+            tracks = data.get(key)
+            if isinstance(tracks, list):
+                return tracks
+        nested = data.get("data")
+        if isinstance(nested, list):
+            return nested
+        if isinstance(nested, dict):
+            for key in ("records", "songs", "tracks", "list"):
+                tracks = nested.get(key)
+                if isinstance(tracks, list):
+                    return tracks
+        return []
 
     async def like_track(self, track):
         encrypted_id = track.get("id")

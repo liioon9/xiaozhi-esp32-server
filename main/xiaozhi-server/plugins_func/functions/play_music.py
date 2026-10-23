@@ -34,13 +34,13 @@ play_music_function_desc = {
     "type": "function",
     "function": {
         "name": "play_music",
-        "description": "当用户要求播放指定歌曲、每日推荐或红心收藏音乐时调用。",
+        "description": "播放网易云音乐。用户指定歌名时必须把歌名传入 song_name，由工具搜索后播放；用户说播放某歌手的歌时传‘歌手名的歌’；支持每日推荐(daily)、心动模式(heartbeat)、红心收藏(favorite)，未指定内容时传 random。",
         "parameters": {
             "type": "object",
             "properties": {
                 "song_name": {
                     "type": "string",
-                    "description": "歌曲名称；每日推荐传'daily'；红心收藏传'favorite'；没有指定则传'random'。",
+                    "description": "歌曲名（如‘晴天’）、歌手歌曲（如‘周杰伦的歌’）、每日推荐传'daily'、心动模式传'heartbeat'、红心收藏传'favorite'；没有指定内容时传'random'。",
                 }
             },
             "required": ["song_name"],
@@ -304,7 +304,40 @@ def _netease_request_type(text):
     ):
         return "favorite", ""
 
+    if normalized == "heartbeat" or any(
+        keyword in normalized
+        for keyword in ("心动模式", "心动推荐", "类似这首", "根据这首歌推荐")
+    ):
+        return "heartbeat", ""
+
+    artist_name = _extract_artist_name(normalized)
+    if artist_name:
+        return "artist", artist_name
+
     return "search", normalized
+
+
+def _extract_artist_name(query):
+    match = re.fullmatch(r"(.+?)(?:的)?(?:歌曲|歌手歌曲|歌|音乐|作品)", query.strip())
+    if not match:
+        return None
+    artist_name = match.group(1).strip()
+    return artist_name or None
+
+
+def _find_artist_id(tracks, artist_name):
+    normalized_name = re.sub(r"\s+", "", artist_name).casefold()
+    for track in tracks:
+        artists = track.get("artists") or track.get("ar") or []
+        for artist in artists:
+            name = artist.get("name", "")
+            artist_id = artist.get("id")
+            if not artist_id:
+                continue
+            candidate = re.sub(r"\s+", "", name).casefold()
+            if candidate == normalized_name or candidate in normalized_name:
+                return artist_id
+    return None
 
 
 async def play_netease_music(conn: "ConnectionHandler", request):
@@ -318,6 +351,26 @@ async def play_netease_music(conn: "ConnectionHandler", request):
         tracks = await provider.daily()
     elif request_type == "favorite":
         tracks = await provider.favorite_tracks()
+    elif request_type == "heartbeat":
+        playlist_id = await provider.favorite_playlist_id()
+        queue = getattr(conn, "music_queue", [])
+        current_index = getattr(conn, "music_queue_index", -1)
+        current_track = (
+            queue[current_index]
+            if 0 <= current_index < len(queue)
+            else None
+        )
+        if current_track is None:
+            current_track = first_playable(await provider.favorite_tracks())
+        if current_track is None or not current_track.get("id"):
+            raise NeteaseCliError("需要一首可用歌曲才能启动心动模式")
+        tracks = await provider.heartbeat(playlist_id, current_track["id"])
+    elif request_type == "artist":
+        matches = await provider.search(query, limit=30)
+        artist_id = _find_artist_id(matches, query)
+        if not artist_id:
+            raise NeteaseCliError(f"没有找到歌手：{query}")
+        tracks = await provider.artist_tracks(artist_id)
     else:
         if not query:
             raise NeteaseCliError("请告诉我想播放的歌曲名称")

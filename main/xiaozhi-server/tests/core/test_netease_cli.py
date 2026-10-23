@@ -68,6 +68,60 @@ class NeteaseCliProviderTest(unittest.TestCase):
         self.assertEqual(tracks, [{"name": "测试歌曲"}])
         self.assertIn("测试", provider.arguments)
 
+    def test_artist_tracks_uses_encrypted_artist_id(self):
+        response = {"code": 200, "data": {"records": [{"name": "测试歌曲"}]}}
+        provider = FakeNeteaseCliProvider(self.config, response)
+
+        tracks = asyncio.run(provider.artist_tracks("artist-encrypted-id", limit=12))
+
+        self.assertEqual(tracks, [{"name": "测试歌曲"}])
+        self.assertEqual(
+            provider.arguments,
+            (
+                "artist",
+                "songs",
+                "--artistId",
+                "artist-encrypted-id",
+                "--limit",
+                12,
+                "--output",
+                "json",
+            ),
+        )
+
+    def test_heartbeat_uses_favorite_playlist_and_seed_song(self):
+        response = {"code": 200, "data": {"songs": [{"name": "相似歌曲"}]}}
+        provider = FakeNeteaseCliProvider(self.config, response)
+
+        tracks = asyncio.run(provider.heartbeat("favorite-playlist", "seed-song", 18))
+
+        self.assertEqual(tracks, [{"name": "相似歌曲"}])
+        self.assertEqual(
+            provider.arguments,
+            (
+                "recommend",
+                "heartbeat",
+                "--playlistId",
+                "favorite-playlist",
+                "--songId",
+                "seed-song",
+                "--count",
+                18,
+                "--output",
+                "json",
+            ),
+        )
+
+    def test_favorite_playlist_id_uses_user_favorite_result(self):
+        provider = FakeNeteaseCliProvider(
+            self.config, {"code": 200, "data": {"id": "favorite-playlist"}}
+        )
+
+        playlist_id = asyncio.run(provider.favorite_playlist_id())
+
+        self.assertEqual(playlist_id, "favorite-playlist")
+        self.assertEqual(provider.arguments[:2], ("user", "favorite"))
+
     def test_only_visible_playable_tracks_are_selected(self):
         blocked = {"visible": False, "playFlag": True, "plLevel": "standard"}
         playable = {"visible": True, "playFlag": True, "plLevel": "standard"}
