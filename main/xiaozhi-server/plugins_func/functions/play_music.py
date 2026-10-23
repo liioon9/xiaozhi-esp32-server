@@ -48,6 +48,25 @@ play_music_function_desc = {
     },
 }
 
+control_music_function_desc = {
+    "type": "function",
+    "function": {
+        "name": "control_music",
+        "description": "当用户要求暂停、继续、恢复或停止当前正在播放的音乐时调用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["pause", "resume", "stop"],
+                    "description": "暂停为 pause，继续或恢复为 resume，停止为 stop。",
+                }
+            },
+            "required": ["action"],
+        },
+    },
+}
+
 
 @register_function("play_music", play_music_function_desc, ToolType.SYSTEM_CTL)
 async def play_music(conn: "ConnectionHandler", song_name: str):
@@ -64,6 +83,25 @@ async def play_music(conn: "ConnectionHandler", song_name: str):
         return ActionResponse(
             action=Action.RESPONSE, result=str(e), response="播放音乐时出错了"
         )
+
+
+@register_function("control_music", control_music_function_desc, ToolType.SYSTEM_CTL)
+async def control_music(conn: "ConnectionHandler", action: str):
+    if action not in {"pause", "resume", "stop"}:
+        return ActionResponse(
+            action=Action.RESPONSE, result="无效音乐控制指令", response="不支持该音乐控制操作"
+        )
+
+    await conn.websocket.send(
+        json.dumps({"type": "media", "action": action}, ensure_ascii=False)
+    )
+    response = {
+        "pause": "好的，音乐暂停了。",
+        "resume": "好的，继续播放音乐。",
+        "stop": "好的，已停止播放音乐。",
+    }[action]
+    conn.logger.bind(tag=TAG).info(f"已下发独立音乐控制命令: {action}")
+    return ActionResponse(action=Action.RECORD, result="指令已接收", response=response)
 
 
 def _extract_song_name(text):

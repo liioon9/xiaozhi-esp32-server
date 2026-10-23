@@ -1,6 +1,6 @@
 // WebSocket消息处理模块
-import { getConfig, saveConnectionUrls } from '../../config/manager.js?v=1023';
-import { uiController } from '../../ui/controller.js?v=1023';
+import { getConfig, saveConnectionUrls } from '../../config/manager.js?v=1024';
+import { uiController } from '../../ui/controller.js?v=1024';
 import { log } from '../../utils/logger.js?v=0205';
 import { getAudioPlayer } from '../audio/player.js?v=0205';
 import { getAudioRecorder } from '../audio/recorder.js?v=0205';
@@ -238,6 +238,25 @@ export class WebSocketHandler {
 
     handleMediaMessage(message) {
         const action = message.action;
+        if (action === 'pause') {
+            this.pendingMediaTrack = null;
+            if (this.mediaPlaybackTimer) {
+                clearTimeout(this.mediaPlaybackTimer);
+                this.mediaPlaybackTimer = null;
+            }
+            this.pauseMediaPlayback();
+            this.mediaPausedForTts = false;
+            log('已暂停独立音乐播放', 'info');
+            return;
+        }
+
+        if (action === 'resume') {
+            this.pendingMediaTrack = null;
+            this.mediaPausedForTts = false;
+            this.resumeMediaPlayback();
+            return;
+        }
+
         if (action === 'stop') {
             this.pendingMediaTrack = null;
             this.mediaPausedForTts = false;
@@ -329,15 +348,26 @@ export class WebSocketHandler {
         audio.pause();
     }
 
+    resumeMediaPlayback() {
+        const audio = document.getElementById('mediaAudio');
+        if (!audio || !audio.src) {
+            log('没有可继续播放的音乐', 'warning');
+            return;
+        }
+        audio.play().then(() => {
+            log('已继续独立音乐播放', 'success');
+        }).catch(error => {
+            log(`浏览器未恢复播放音乐（${error.name || '播放失败'}）`, 'warning');
+        });
+    }
+
     resumeMediaAfterTts() {
         const audio = document.getElementById('mediaAudio');
         this.mediaPausedForTts = false;
         if (!audio || !audio.src) return;
         setTimeout(() => {
             if (this.isRemoteSpeaking || !audio.paused) return;
-            audio.play().catch(error => {
-                log(`助手回复结束，音乐恢复播放失败（${error.name || '播放失败'}）`, 'warning');
-            });
+            this.resumeMediaPlayback();
         }, 300);
     }
 

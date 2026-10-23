@@ -4,7 +4,7 @@ import { getAudioPlayer } from './core/audio/player.js?v=0205';
 import { checkMicrophoneAvailability, isHttpNonLocalhost } from './core/audio/recorder.js?v=0205';
 import { initMcpTools } from './core/mcp/tools.js?v=0205';
 import { startWakewordBridgeListener } from './core/network/wakeword-bridge.js?v=0205';
-import { uiController } from './ui/controller.js?v=1023';
+import { uiController } from './ui/controller.js?v=1024';
 import { log } from './utils/logger.js?v=0205';
 
 // 辅助函数：将Base64数据转换为Blob

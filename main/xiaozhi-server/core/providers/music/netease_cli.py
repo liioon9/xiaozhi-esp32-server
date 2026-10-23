@@ -25,6 +25,9 @@ class NeteaseCliProvider:
             netease_config.get("log_path", "~/.config/ncm-cli/app.log")
         ).expanduser()
         self.command_timeout = int(netease_config.get("command_timeout", 15))
+        self.play_url_wait_seconds = float(
+            netease_config.get("play_url_wait_seconds", 10)
+        )
         self._resolve_lock = asyncio.Lock()
 
     async def _run_json(self, *arguments):
@@ -111,7 +114,19 @@ class NeteaseCliProvider:
                 "--output",
                 "json",
             )
-            return self._read_play_url(start_offset, encrypted_id)
+            return await self._wait_for_play_url(start_offset, encrypted_id)
+
+    async def _wait_for_play_url(self, start_offset, encrypted_id):
+        deadline = asyncio.get_running_loop().time() + self.play_url_wait_seconds
+        while True:
+            try:
+                return self._read_play_url(start_offset, encrypted_id)
+            except NeteaseCliError:
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise NeteaseCliError(
+                        "等待网易云 CLI 写入可播放地址超时"
+                    )
+                await asyncio.sleep(0.2)
 
     def _read_play_url(self, start_offset, encrypted_id):
         if not self.log_path.is_file():

@@ -1,9 +1,9 @@
 // UI controller module
-import { loadConfig, saveConfig } from '../config/manager.js?v=1023';
+import { loadConfig, saveConfig } from '../config/manager.js?v=1024';
 import { getAudioPlayer } from '../core/audio/player.js?v=0205';
 import { getAudioRecorder } from '../core/audio/recorder.js?v=0205';
 import { requestWakewordBridge, stopWakewordBridgeListener, startWakewordBridgeListener, getWakewordBridgeUrl, onNextBridgeConnected } from '../core/network/wakeword-bridge.js?v=0205';
-import { getWebSocketHandler } from '../core/network/websocket.js?v=1023';
+import { getWebSocketHandler } from '../core/network/websocket.js?v=1024';
 import { log } from '../utils/logger.js?v=0205';
 
 // UI controller class
