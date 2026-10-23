@@ -14,9 +14,9 @@ from core.api.music_handler import (
     get_track_stream_url,
     register_netease_track,
 )
-from core.providers.music.netease_cli import (
-    NeteaseCliError,
-    NeteaseCliProvider,
+from core.providers.music.netease_openapi import (
+    NeteaseOpenApiError,
+    NeteaseOpenApiProvider,
     first_playable,
 )
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType, ContentType
@@ -283,7 +283,7 @@ def _netease_request_type(text):
 async def play_netease_music(conn: "ConnectionHandler", request):
     provider = MUSIC_CACHE.get("netease_provider")
     if provider is None:
-        provider = NeteaseCliProvider(conn.config)
+        provider = NeteaseOpenApiProvider(conn.config)
         MUSIC_CACHE["netease_provider"] = provider
 
     request_type, query = _netease_request_type(request)
@@ -293,13 +293,13 @@ async def play_netease_music(conn: "ConnectionHandler", request):
         tracks = await provider.favorite_tracks()
     else:
         if not query:
-            raise NeteaseCliError("请告诉我想播放的歌曲名称")
+            raise NeteaseOpenApiError("请告诉我想播放的歌曲名称")
         tracks = await provider.search(query)
 
     queue = [track for track in tracks if first_playable([track])]
     track = queue[0] if queue else None
     if track is None:
-        raise NeteaseCliError("没有找到当前账号可播放的歌曲")
+        raise NeteaseOpenApiError("没有找到当前账号可播放的歌曲")
 
     conn.music_queue = queue
     conn.music_queue_index = 0
