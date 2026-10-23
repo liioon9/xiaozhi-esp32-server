@@ -52,14 +52,14 @@ control_music_function_desc = {
     "type": "function",
     "function": {
         "name": "control_music",
-        "description": "当用户要求暂停、继续、恢复或停止当前正在播放的音乐时调用。",
+        "description": "当用户要求暂停、继续、恢复、停止或切换下一首当前正在播放的音乐时调用。用户说下一首、换一首、切歌时必须使用 next。",
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["pause", "resume", "stop"],
-                    "description": "暂停为 pause，继续或恢复为 resume，停止为 stop。",
+                    "enum": ["pause", "resume", "stop", "next"],
+                    "description": "暂停为 pause，继续或恢复为 resume，停止为 stop，下一首、换一首或切歌为 next。",
                 }
             },
             "required": ["action"],
@@ -87,14 +87,24 @@ async def play_music(conn: "ConnectionHandler", song_name: str):
 
 @register_function("control_music", control_music_function_desc, ToolType.SYSTEM_CTL)
 async def control_music(conn: "ConnectionHandler", action: str):
-    if action not in {"pause", "resume", "stop"}:
+    if action not in {"pause", "resume", "stop", "next"}:
         return ActionResponse(
             action=Action.RESPONSE, result="无效音乐控制指令", response="不支持该音乐控制操作"
         )
 
-    await conn.websocket.send(
-        json.dumps({"type": "media", "action": action}, ensure_ascii=False)
-    )
+    if action == "next":
+        if not await play_next_netease_music(conn):
+            return ActionResponse(
+                action=Action.RESPONSE,
+                result="播放队列已结束",
+                response="当前播放列表已经没有下一首了。",
+            )
+        conn.logger.bind(tag=TAG).info("已下发独立音乐控制命令: next")
+        return ActionResponse(
+            action=Action.RECORD, result="指令已接收", response="好的，正在播放下一首。"
+        )
+
+    await conn.websocket.send(json.dumps({"type": "media", "action": action}, ensure_ascii=False))
     if action == "stop":
         conn.music_queue = []
         conn.music_queue_index = -1
