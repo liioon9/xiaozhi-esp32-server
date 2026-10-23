@@ -11,6 +11,18 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 
 OPENAPI_BASE_URL = "https://openapi.music.163.com"
+DEVICE_ENVIRONMENT_NAMES = {
+    "channel": "NETEASE_DEVICE_CHANNEL",
+    "deviceId": "NETEASE_DEVICE_ID",
+    "deviceType": "NETEASE_DEVICE_TYPE",
+    "appVer": "NETEASE_DEVICE_APP_VER",
+    "os": "NETEASE_DEVICE_OS",
+    "osVer": "NETEASE_DEVICE_OS_VER",
+    "brand": "NETEASE_DEVICE_BRAND",
+    "model": "NETEASE_DEVICE_MODEL",
+    "clientIp": "NETEASE_DEVICE_CLIENT_IP",
+    "netStatus": "NETEASE_DEVICE_NET_STATUS",
+}
 
 
 class NeteaseOpenApiError(RuntimeError):
@@ -55,10 +67,13 @@ class NeteaseOpenApiProvider:
                 "token_store", "~/.config/xiaozhi/netease_openapi_tokens.json"
             )
         ).expanduser()
+        configured_device = dict(self.settings.get("device", {}))
         self.device = {
             key: self._expand_environment(value)
-            for key, value in dict(self.settings.get("device", {})).items()
+            for key, value in configured_device.items()
         }
+        for key, environment_name in DEVICE_ENVIRONMENT_NAMES.items():
+            self.device.setdefault(key, os.environ.get(environment_name, ""))
         self._private_key = None
 
     def _env(self, setting_name, default_name):
