@@ -28,6 +28,19 @@ class NeteaseCliProvider:
         self.play_url_wait_seconds = float(
             netease_config.get("play_url_wait_seconds", 10)
         )
+        self.recover_stale_daemon = bool(
+            netease_config.get("recover_stale_daemon", True)
+        )
+        self.daemon_socket_path = Path(
+            netease_config.get(
+                "daemon_socket_path", "~/.config/ncm-cli/player-daemon.sock"
+            )
+        ).expanduser()
+        self.daemon_process_pattern = str(
+            netease_config.get(
+                "daemon_process_pattern", "@music163/ncm-cli/dist/index.js"
+            )
+        )
         self._resolve_lock = asyncio.Lock()
 
     async def _run_json(self, *arguments):
@@ -103,18 +116,44 @@ class NeteaseCliProvider:
             raise NeteaseCliError("歌曲缺少播放 ID")
 
         async with self._resolve_lock:
-            start_offset = self.log_path.stat().st_size if self.log_path.exists() else 0
-            await self._run(
-                "play",
-                "--song",
-                "--encrypted-id",
-                encrypted_id,
-                "--original-id",
-                original_id,
-                "--output",
-                "json",
-            )
-            return await self._wait_for_play_url(start_offset, encrypted_id)
+            for attempt in range(2):
+                start_offset = (
+                    self.log_path.stat().st_size if self.log_path.exists() else 0
+                )
+                try:
+                    await self._run(
+                        "play",
+                        "--song",
+                        "--encrypted-id",
+                        encrypted_id,
+                        "--original-id",
+                        original_id,
+                        "--output",
+                        "json",
+                    )
+                    return await self._wait_for_play_url(start_offset, encrypted_id)
+                except NeteaseCliError:
+                    if attempt or not self.recover_stale_daemon:
+                        raise
+                    await self._recover_player_daemon()
+
+    async def _recover_player_daemon(self):
+        """Clear only the CLI's stale local player daemon before one retry."""
+        process = await asyncio.create_subprocess_exec(
+            "pkill",
+            "-f",
+            self.daemon_process_pattern,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await process.communicate()
+        try:
+            self.daemon_socket_path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise NeteaseCliError("无法清理网易云 CLI 播放器守护进程") from error
+        await asyncio.sleep(0.3)
 
     async def _wait_for_play_url(self, start_offset, encrypted_id):
         deadline = asyncio.get_running_loop().time() + self.play_url_wait_seconds

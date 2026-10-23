@@ -166,6 +166,11 @@ plugins:
       cli_command: "ncm-cli"
       log_path: "/root/.config/ncm-cli/app.log"
       command_timeout: 15
+      play_url_wait_seconds: 15
+      # ncm-cli 的本地播放器守护进程卡死时，自动清理后重试一次。
+      recover_stale_daemon: true
+      daemon_socket_path: "/root/.config/ncm-cli/player-daemon.sock"
+      daemon_process_pattern: "@music163/ncm-cli/dist/index.js"
     music_ext: # 音乐文件类型，p3格式效率最高
       - ".mp3"
       - ".wav"

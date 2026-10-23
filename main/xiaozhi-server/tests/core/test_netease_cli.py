@@ -3,8 +3,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from core.providers.music.netease_cli import (
+    NeteaseCliError,
     NeteaseCliProvider,
     first_playable,
     is_playable,
@@ -88,6 +90,25 @@ class NeteaseCliProviderTest(unittest.TestCase):
         self.assertEqual(
             result, "https://music.example.test/temporary.mp3?token=secret"
         )
+
+    def test_resolve_restarts_stale_daemon_once_then_retries(self):
+        provider = NeteaseCliProvider(self.config)
+        provider._run = AsyncMock(return_value="")
+        provider._wait_for_play_url = AsyncMock(
+            side_effect=[
+                NeteaseCliError("等待网易云 CLI 写入可播放地址超时"),
+                "https://music.example.test/recovered.mp3",
+            ]
+        )
+        provider._recover_player_daemon = AsyncMock()
+
+        result = asyncio.run(
+            provider.resolve_play_url({"id": "encrypted", "originalId": 1})
+        )
+
+        self.assertEqual(result, "https://music.example.test/recovered.mp3")
+        self.assertEqual(provider._run.await_count, 2)
+        provider._recover_player_daemon.assert_awaited_once()
 
 
 if __name__ == "__main__":
