@@ -52,14 +52,24 @@ control_music_function_desc = {
     "type": "function",
     "function": {
         "name": "control_music",
-        "description": "当用户要求暂停、继续、恢复、停止或切换下一首当前正在播放的音乐时调用。用户说下一首、换一首、切歌时必须使用 next。",
+        "description": "当用户要求控制当前音乐播放时调用。支持暂停、继续、停止、上一首、下一首，以及切换顺序播放、列表循环、单曲循环和随机播放模式。",
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["pause", "resume", "stop", "next"],
-                    "description": "暂停为 pause，继续或恢复为 resume，停止为 stop，下一首、换一首或切歌为 next。",
+                    "enum": [
+                        "pause",
+                        "resume",
+                        "stop",
+                        "previous",
+                        "next",
+                        "sequence",
+                        "repeat_all",
+                        "repeat_one",
+                        "shuffle",
+                    ],
+                    "description": "暂停为 pause，继续或恢复为 resume，停止为 stop，上一首为 previous，下一首、换一首或切歌为 next。顺序播放为 sequence，列表循环为 repeat_all，单曲循环为 repeat_one，随机播放为 shuffle。",
                 }
             },
             "required": ["action"],
@@ -87,7 +97,17 @@ async def play_music(conn: "ConnectionHandler", song_name: str):
 
 @register_function("control_music", control_music_function_desc, ToolType.SYSTEM_CTL)
 async def control_music(conn: "ConnectionHandler", action: str):
-    if action not in {"pause", "resume", "stop", "next"}:
+    if action not in {
+        "pause",
+        "resume",
+        "stop",
+        "previous",
+        "next",
+        "sequence",
+        "repeat_all",
+        "repeat_one",
+        "shuffle",
+    }:
         return ActionResponse(
             action=Action.RESPONSE, result="无效音乐控制指令", response="不支持该音乐控制操作"
         )
@@ -104,10 +124,34 @@ async def control_music(conn: "ConnectionHandler", action: str):
             action=Action.RECORD, result="指令已接收", response="好的，正在播放下一首。"
         )
 
+    if action == "previous":
+        if not await play_previous_netease_music(conn):
+            return ActionResponse(
+                action=Action.RESPONSE,
+                result="没有上一首",
+                response="当前已经是播放列表的第一首了。",
+            )
+        conn.logger.bind(tag=TAG).info("已下发独立音乐控制命令: previous")
+        return ActionResponse(
+            action=Action.RECORD, result="指令已接收", response="好的，正在播放上一首。"
+        )
+
+    if action in {"sequence", "repeat_all", "repeat_one", "shuffle"}:
+        conn.music_play_mode = action
+        response = {
+            "sequence": "好的，已切换为顺序播放。",
+            "repeat_all": "好的，已开启列表循环。",
+            "repeat_one": "好的，已开启单曲循环。",
+            "shuffle": "好的，已开启随机播放。",
+        }[action]
+        conn.logger.bind(tag=TAG).info(f"已切换音乐播放模式: {action}")
+        return ActionResponse(action=Action.RECORD, result="指令已接收", response=response)
+
     await conn.websocket.send(json.dumps({"type": "media", "action": action}, ensure_ascii=False))
     if action == "stop":
         conn.music_queue = []
         conn.music_queue_index = -1
+        conn.music_play_history = []
     response = {
         "pause": "好的，音乐暂停了。",
         "resume": "好的，继续播放音乐。",
@@ -259,20 +303,58 @@ async def play_netease_music(conn: "ConnectionHandler", request):
 
     conn.music_queue = queue
     conn.music_queue_index = 0
+    conn.music_play_history = [0]
     await _play_netease_track(conn, track)
 
 
 async def play_next_netease_music(conn: "ConnectionHandler"):
     queue = getattr(conn, "music_queue", [])
-    next_index = getattr(conn, "music_queue_index", -1) + 1
-    if next_index >= len(queue):
-        conn.music_queue = []
-        conn.music_queue_index = -1
+    current_index = getattr(conn, "music_queue_index", -1)
+    if not queue or current_index < 0:
         return False
 
-    conn.music_queue_index = next_index
-    await _play_netease_track(conn, queue[next_index])
+    mode = getattr(conn, "music_play_mode", "sequence")
+    if mode == "repeat_one":
+        next_index = current_index
+    elif mode == "shuffle":
+        candidates = [index for index in range(len(queue)) if index != current_index]
+        next_index = random.choice(candidates) if candidates else current_index
+    elif current_index + 1 < len(queue):
+        next_index = current_index + 1
+    elif mode == "repeat_all":
+        next_index = 0
+    else:
+        return False
+
+    await _play_netease_queue_index(conn, next_index)
     return True
+
+
+async def play_previous_netease_music(conn: "ConnectionHandler"):
+    queue = getattr(conn, "music_queue", [])
+    history = getattr(conn, "music_play_history", [])
+    if not queue:
+        return False
+
+    if len(history) < 2:
+        if getattr(conn, "music_play_mode", "sequence") != "repeat_all":
+            return False
+        await _play_netease_queue_index(conn, len(queue) - 1)
+        return True
+
+    history.pop()
+    await _play_netease_queue_index(conn, history[-1], append_history=False)
+    return True
+
+
+async def _play_netease_queue_index(conn: "ConnectionHandler", index: int, append_history=True):
+    conn.music_queue_index = index
+    if append_history:
+        history = getattr(conn, "music_play_history", [])
+        if not history or history[-1] != index:
+            history.append(index)
+        conn.music_play_history = history
+    await _play_netease_track(conn, conn.music_queue[index])
 
 
 async def _play_netease_track(conn: "ConnectionHandler", track):
