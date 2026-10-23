@@ -31,6 +31,34 @@ TAG = __name__
 _ffmpeg_path_lock = threading.Lock()
 _ffmpeg_ref_count = 0
 _ffmpeg_original_path: str | None = None
+_ffmpeg_override_checked = False
+_ffmpeg_override_available = False
+
+
+def _is_ffmpeg_override_available(bin_dir: str) -> bool:
+    """只在 Conda 自带的 ffmpeg/ffprobe 可执行时才优先使用它们。"""
+    global _ffmpeg_override_checked, _ffmpeg_override_available
+    if _ffmpeg_override_checked:
+        return _ffmpeg_override_available
+
+    ffmpeg = os.path.join(bin_dir, "ffmpeg")
+    ffprobe = os.path.join(bin_dir, "ffprobe")
+    try:
+        for executable in (ffmpeg, ffprobe):
+            subprocess.run(
+                [executable, "-version"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+                timeout=3,
+            )
+        _ffmpeg_override_available = True
+    except (OSError, subprocess.SubprocessError):
+        _ffmpeg_override_available = False
+    finally:
+        _ffmpeg_override_checked = True
+
+    return _ffmpeg_override_available
 
 
 @contextmanager
@@ -39,9 +67,7 @@ def _ffmpeg_path_override():
         yield
         return
     bin_dir = os.path.dirname(sys.executable)
-    ffprobe = os.path.join(bin_dir, "ffprobe")
-    ffmpeg = os.path.join(bin_dir, "ffmpeg")
-    if not (os.path.isfile(ffprobe) or os.path.isfile(ffmpeg)):
+    if not _is_ffmpeg_override_available(bin_dir):
         yield
         return
 
