@@ -57,17 +57,11 @@ class NeteaseOpenApiProvider:
             self.settings.get("openapi_base_url", OPENAPI_BASE_URL)
         ).rstrip("/")
         self.timeout = int(self.settings.get("request_timeout", 15))
-        self.app_id = str(
-            self.settings.get("app_id") or self._env("app_id_env", "NETEASE_APP_ID")
-        ).strip()
-        self.app_secret = str(
-            self.settings.get("app_secret")
-            or self._env("app_secret_env", "NETEASE_APP_SECRET")
-        ).strip()
-        self.private_key_path = str(
-            self.settings.get("private_key_path")
-            or self._env("private_key_path_env", "NETEASE_PRIVATE_KEY_PATH")
-        ).strip()
+        self.app_id = self._env("app_id_env", "NETEASE_APP_ID")
+        self.app_secret = self._env("app_secret_env", "NETEASE_APP_SECRET")
+        self.private_key_path = self._env(
+            "private_key_path_env", "NETEASE_PRIVATE_KEY_PATH"
+        )
         self.token_store = Path(
             self.settings.get(
                 "token_store", "~/.config/xiaozhi/netease_openapi_tokens.json"

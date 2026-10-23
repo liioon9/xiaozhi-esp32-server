@@ -162,25 +162,22 @@ plugins:
     # ESP32 可访问的 HTTP 地址；留空时从 server.websocket 的主机名和 http_port 自动生成
     stream_base_url: ""
     remote_url_ttl_seconds: 600  # 下发给设备的随机播放地址有效期
-    # 网易云官方开放平台。实际值请写在 data/.config.yaml，后者已被 Git 忽略。
-    # RSA 私钥应单独保存在仅服务账户可读的文件中，YAML 只填写其路径。
+    # 网易云官方开放平台。密钥和登录令牌不得写入本文件或提交 Git；
+    # 通过 systemd 的 EnvironmentFile 配置 NETEASE_* 环境变量。
     netease:
       request_timeout: 15
       token_store: "/root/.config/xiaozhi/netease_openapi_tokens.json"
-      app_id: ""
-      app_secret: ""
-      private_key_path: ""
       device:
-        channel: ""
-        deviceId: ""
-        deviceType: ""
-        appVer: ""
-        os: ""
-        osVer: ""
-        brand: ""
-        model: ""
-        clientIp: ""
-        netStatus: ""
+        channel: "${NETEASE_DEVICE_CHANNEL}"
+        deviceId: "${NETEASE_DEVICE_ID}"
+        deviceType: "${NETEASE_DEVICE_TYPE}"
+        appVer: "${NETEASE_DEVICE_APP_VER}"
+        os: "${NETEASE_DEVICE_OS}"
+        osVer: "${NETEASE_DEVICE_OS_VER}"
+        brand: "${NETEASE_DEVICE_BRAND}"
+        model: "${NETEASE_DEVICE_MODEL}"
+        clientIp: "${NETEASE_DEVICE_CLIENT_IP}"
+        netStatus: "${NETEASE_DEVICE_NET_STATUS}"
     music_ext: # 音乐文件类型，p3格式效率最高
       - ".mp3"
       - ".wav"
