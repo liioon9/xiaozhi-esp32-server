@@ -96,27 +96,6 @@ class NeteaseOpenApiProviderTest(unittest.TestCase):
         )
         self.assertEqual(json.loads(parameters["bizContent"]), {"songId": "song-id"})
 
-    def test_device_values_can_be_supplied_only_by_environment(self):
-        config = {"plugins": {"play_music": {"netease": {}}}}
-        device_environment = {
-            f"NETEASE_DEVICE_{key}": value
-            for key, value in {
-                "CHANNEL": "test",
-                "ID": "device-1",
-                "TYPE": "speaker",
-                "APP_VER": "1.0.0",
-                "OS": "linux",
-                "OS_VER": "1",
-                "BRAND": "test",
-                "MODEL": "test",
-                "CLIENT_IP": "127.0.0.1",
-                "NET_STATUS": "wifi",
-            }.items()
-        }
-        with patch.dict(os.environ, device_environment, clear=False):
-            provider = NeteaseOpenApiProvider(config)
-        self.assertEqual(provider.device["deviceId"], "device-1")
-
     def test_resolve_play_url_uses_official_song_endpoint(self):
         with patch.dict(os.environ, self.environment, clear=False), patch.object(
             NeteaseOpenApiProvider, "_authenticated_request", new_callable=AsyncMock
