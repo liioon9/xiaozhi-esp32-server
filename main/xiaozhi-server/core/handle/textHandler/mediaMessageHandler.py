@@ -26,3 +26,6 @@ class MediaTextMessageHandler(TextMessageHandler):
             conn.logger.bind(tag=__name__).info("当前歌曲播放结束，已下发下一首")
         else:
             conn.logger.bind(tag=__name__).info("播放队列已结束")
+            await conn.websocket.send(
+                '{"type":"media","action":"queue_ended"}'
+            )

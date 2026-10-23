@@ -21,6 +21,7 @@ export class WebSocketHandler {
         this.pendingMediaTrack = null;
         this.mediaPlaybackTimer = null;
         this.mediaPausedForTts = false;
+        this.mediaKeepaliveTimer = null;
     }
 
     // 发送hello握手消息
@@ -238,6 +239,12 @@ export class WebSocketHandler {
 
     handleMediaMessage(message) {
         const action = message.action;
+        if (action === 'queue_ended') {
+            this.stopMediaKeepalive();
+            log('播放列表已结束', 'info');
+            return;
+        }
+
         if (action === 'pause') {
             this.pendingMediaTrack = null;
             if (this.mediaPlaybackTimer) {
@@ -258,6 +265,7 @@ export class WebSocketHandler {
         }
 
         if (action === 'stop') {
+            this.stopMediaKeepalive();
             this.pendingMediaTrack = null;
             this.mediaPausedForTts = false;
             if (this.mediaPlaybackTimer) {
@@ -289,7 +297,24 @@ export class WebSocketHandler {
             url: mediaUrl.toString(),
             title: message.track.title || '网易云音乐'
         };
+        this.startMediaKeepalive();
         this.scheduleMediaPlayback(this.isRemoteSpeaking ? 0 : 1200);
+    }
+
+    startMediaKeepalive() {
+        if (this.mediaKeepaliveTimer) return;
+        const sendPing = () => {
+            if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) return;
+            this.websocket.send(JSON.stringify({ type: 'ping', purpose: 'media_playback' }));
+        };
+        sendPing();
+        this.mediaKeepaliveTimer = setInterval(sendPing, 25000);
+    }
+
+    stopMediaKeepalive() {
+        if (!this.mediaKeepaliveTimer) return;
+        clearInterval(this.mediaKeepaliveTimer);
+        this.mediaKeepaliveTimer = null;
     }
 
     scheduleMediaPlayback(delayMs) {
@@ -612,6 +637,7 @@ export class WebSocketHandler {
         };
 
         this.websocket.onclose = () => {
+            this.stopMediaKeepalive();
             log('已断开连接', 'info');
 
             if (this.onConnectionStateChange) {
@@ -661,6 +687,7 @@ export class WebSocketHandler {
     disconnect() {
         if (!this.websocket) return;
 
+        this.stopMediaKeepalive();
         this.websocket.close();
         const audioRecorder = getAudioRecorder();
         audioRecorder.stop();

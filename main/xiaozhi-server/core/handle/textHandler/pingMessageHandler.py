@@ -25,7 +25,8 @@ class PingMessageHandler(TextMessageHandler):
         """
         # 检查是否启用了WebSocket心跳功能
         enable_websocket_ping = conn.config.get("enable_websocket_ping", False)
-        if not enable_websocket_ping:
+        is_media_keepalive = msg_json.get("purpose") == "media_playback"
+        if not enable_websocket_ping and not is_media_keepalive:
             conn.logger.debug(f"WebSocket心跳功能未启用，忽略PING消息")
             return
 
