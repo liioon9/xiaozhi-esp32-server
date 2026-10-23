@@ -325,21 +325,6 @@ def _extract_artist_name(query):
     return artist_name or None
 
 
-def _find_artist_id(tracks, artist_name):
-    normalized_name = re.sub(r"\s+", "", artist_name).casefold()
-    for track in tracks:
-        artists = track.get("artists") or track.get("ar") or []
-        for artist in artists:
-            name = artist.get("name", "")
-            artist_id = artist.get("id")
-            if not artist_id:
-                continue
-            candidate = re.sub(r"\s+", "", name).casefold()
-            if candidate == normalized_name or candidate in normalized_name:
-                return artist_id
-    return None
-
-
 async def play_netease_music(conn: "ConnectionHandler", request):
     provider = MUSIC_CACHE.get("netease_provider")
     if provider is None:
@@ -366,11 +351,9 @@ async def play_netease_music(conn: "ConnectionHandler", request):
             raise NeteaseCliError("需要一首可用歌曲才能启动心动模式")
         tracks = await provider.heartbeat(playlist_id, current_track["id"])
     elif request_type == "artist":
-        matches = await provider.search(query, limit=30)
-        artist_id = _find_artist_id(matches, query)
-        if not artist_id:
+        tracks = await provider.search_artist_tracks(query, limit=30)
+        if not tracks:
             raise NeteaseCliError(f"没有找到歌手：{query}")
-        tracks = await provider.artist_tracks(artist_id)
     else:
         if not query:
             raise NeteaseCliError("请告诉我想播放的歌曲名称")

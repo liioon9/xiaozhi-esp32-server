@@ -114,11 +114,17 @@ class NeteaseCliProvider:
             return data
         return data.get("records", data.get("songs", []))
 
-    async def artist_tracks(self, artist_id, limit=30):
-        payload = await self._run_json(
-            "artist", "songs", "--artistId", artist_id, "--limit", limit
-        )
-        return self._extract_tracks(payload)
+    async def search_artist_tracks(self, artist_name, limit=30):
+        tracks = await self.search(artist_name, limit=limit)
+        normalized_name = "".join(artist_name.split()).casefold()
+        return [
+            track
+            for track in tracks
+            if any(
+                "".join(artist.get("name", "").split()).casefold() == normalized_name
+                for artist in (track.get("artists") or track.get("ar") or [])
+            )
+        ]
 
     async def heartbeat(self, playlist_id, song_id, limit=30):
         payload = await self._run_json(

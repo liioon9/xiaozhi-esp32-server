@@ -68,20 +68,30 @@ class NeteaseCliProviderTest(unittest.TestCase):
         self.assertEqual(tracks, [{"name": "测试歌曲"}])
         self.assertIn("测试", provider.arguments)
 
-    def test_artist_tracks_uses_encrypted_artist_id(self):
-        response = {"code": 200, "data": {"records": [{"name": "测试歌曲"}]}}
+    def test_artist_search_returns_only_exact_artist_matches(self):
+        response = {
+            "code": 200,
+            "data": {
+                "records": [
+                    {"name": "测试歌曲", "artists": [{"name": "测试歌手"}]},
+                    {"name": "翻唱歌曲", "artists": [{"name": "其他歌手"}]},
+                ]
+            },
+        }
         provider = FakeNeteaseCliProvider(self.config, response)
 
-        tracks = asyncio.run(provider.artist_tracks("artist-encrypted-id", limit=12))
+        tracks = asyncio.run(provider.search_artist_tracks("测试歌手", limit=12))
 
-        self.assertEqual(tracks, [{"name": "测试歌曲"}])
+        self.assertEqual(
+            tracks, [{"name": "测试歌曲", "artists": [{"name": "测试歌手"}]}]
+        )
         self.assertEqual(
             provider.arguments,
             (
-                "artist",
-                "songs",
-                "--artistId",
-                "artist-encrypted-id",
+                "search",
+                "song",
+                "--keyword",
+                "测试歌手",
                 "--limit",
                 12,
                 "--output",
