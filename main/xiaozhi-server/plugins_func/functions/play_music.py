@@ -34,16 +34,28 @@ play_music_function_desc = {
     "type": "function",
     "function": {
         "name": "play_music",
-        "description": "播放网易云音乐。用户指定歌名时必须把歌名传入 song_name，由工具搜索后播放；用户说播放某歌手的歌时传‘歌手名的歌’；支持每日推荐(daily)、心动模式(heartbeat)、红心收藏(favorite)，未指定内容时传 random。",
+        "description": "播放音乐。必须用 mode 明确选择操作，不能把操作类型写进 query：指定歌曲用 song，播放某艺人的歌曲用 artist，每日推荐用 daily，心动模式用 heartbeat，红心收藏用 favorite，随机播放用 random。song 和 artist 必须提供 query。",
         "parameters": {
             "type": "object",
             "properties": {
-                "song_name": {
+                "mode": {
                     "type": "string",
-                    "description": "歌曲名（如‘晴天’）、歌手歌曲（如‘周杰伦的歌’）、每日推荐传'daily'、心动模式传'heartbeat'、红心收藏传'favorite'；没有指定内容时传'random'。",
-                }
+                    "enum": [
+                        "song",
+                        "artist",
+                        "daily",
+                        "heartbeat",
+                        "favorite",
+                        "random",
+                    ],
+                    "description": "明确的播放操作类型。",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "mode=song 时填歌曲名；mode=artist 时只填艺人名。其他模式省略。",
+                },
             },
-            "required": ["song_name"],
+            "required": ["mode"],
         },
     },
 }
@@ -81,12 +93,30 @@ control_music_function_desc = {
 
 
 @register_function("play_music", play_music_function_desc, ToolType.SYSTEM_CTL)
-async def play_music(conn: "ConnectionHandler", song_name: str):
+async def play_music(conn: "ConnectionHandler", mode: str, query: str = ""):
     try:
-        music_intent = (
-            f"播放音乐 {song_name}" if song_name != "random" else "随机播放音乐"
-        )
-        await handle_music_command(conn, music_intent)
+        if mode not in {
+            "song",
+            "artist",
+            "daily",
+            "heartbeat",
+            "favorite",
+            "random",
+        }:
+            raise NeteaseCliError("不支持的音乐播放模式")
+        if mode in {"song", "artist"} and not query.strip():
+            raise NeteaseCliError("请提供歌曲名或艺人名")
+
+        initialize_music_handler(conn)
+        music_source = MUSIC_CACHE.get("music_config", {}).get("source", "local")
+        if music_source == "netease":
+            await play_netease_music(conn, mode, query.strip())
+        elif mode == "song":
+            await handle_music_command(conn, f"播放音乐 {query.strip()}")
+        elif mode == "random":
+            await play_local_music(conn)
+        else:
+            raise NeteaseCliError("当前音乐源不支持该播放模式")
         return ActionResponse(
             action=Action.RECORD, result="指令已接收", response="正在为您播放音乐"
         )
@@ -259,15 +289,10 @@ def initialize_music_handler(conn: "ConnectionHandler"):
 
 
 async def handle_music_command(conn: "ConnectionHandler", text):
+    """Handle a local-file music request."""
     initialize_music_handler(conn)
     global MUSIC_CACHE
 
-    music_source = MUSIC_CACHE.get("music_config", {}).get("source", "local")
-    if music_source == "netease":
-        await play_netease_music(conn, text)
-        return True
-
-    """处理音乐播放指令"""
     clean_text = re.sub(r"[^\w\s]", "", text).strip()
     conn.logger.bind(tag=TAG).debug(f"检查是否是音乐命令: {clean_text}")
 
@@ -292,51 +317,17 @@ async def handle_music_command(conn: "ConnectionHandler", text):
     return True
 
 
-def _netease_request_type(text):
-    normalized = re.sub(r"^(播放音乐|播放歌曲|播放|听)", "", text).strip().lower()
-    if normalized in {"daily", "random"} or any(
-        keyword in normalized for keyword in ("每日推荐", "日推", "今日推荐")
-    ):
-        return "daily", ""
-    if normalized == "favorite" or any(
-        keyword in normalized
-        for keyword in ("红心", "我喜欢的音乐", "收藏的音乐", "收藏歌曲")
-    ):
-        return "favorite", ""
-
-    if normalized == "heartbeat" or any(
-        keyword in normalized
-        for keyword in ("心动模式", "心动推荐", "类似这首", "根据这首歌推荐")
-    ):
-        return "heartbeat", ""
-
-    artist_name = _extract_artist_name(normalized)
-    if artist_name:
-        return "artist", artist_name
-
-    return "search", normalized
-
-
-def _extract_artist_name(query):
-    match = re.fullmatch(r"(.+?)(?:的)?(?:歌曲|歌手歌曲|歌|音乐|作品)", query.strip())
-    if not match:
-        return None
-    artist_name = match.group(1).strip()
-    return artist_name or None
-
-
-async def play_netease_music(conn: "ConnectionHandler", request):
+async def play_netease_music(conn: "ConnectionHandler", mode: str, query: str = ""):
     provider = MUSIC_CACHE.get("netease_provider")
     if provider is None:
         provider = NeteaseCliProvider(conn.config)
         MUSIC_CACHE["netease_provider"] = provider
 
-    request_type, query = _netease_request_type(request)
-    if request_type == "daily":
+    if mode == "daily":
         tracks = await provider.daily()
-    elif request_type == "favorite":
+    elif mode == "favorite":
         tracks = await provider.favorite_tracks()
-    elif request_type == "heartbeat":
+    elif mode == "heartbeat":
         playlist_id = await provider.favorite_playlist_id()
         queue = getattr(conn, "music_queue", [])
         current_index = getattr(conn, "music_queue_index", -1)
@@ -350,14 +341,18 @@ async def play_netease_music(conn: "ConnectionHandler", request):
         if current_track is None or not current_track.get("id"):
             raise NeteaseCliError("需要一首可用歌曲才能启动心动模式")
         tracks = await provider.heartbeat(playlist_id, current_track["id"])
-    elif request_type == "artist":
+    elif mode == "artist":
         tracks = await provider.search_artist_tracks(query, limit=30)
         if not tracks:
             raise NeteaseCliError(f"没有找到歌手：{query}")
-    else:
+    elif mode == "song":
         if not query:
             raise NeteaseCliError("请告诉我想播放的歌曲名称")
         tracks = await provider.search(query)
+    elif mode == "random":
+        tracks = await provider.daily()
+    else:
+        raise NeteaseCliError("不支持的网易云音乐播放模式")
 
     queue = [track for track in tracks if first_playable([track])]
     track = queue[0] if queue else None
