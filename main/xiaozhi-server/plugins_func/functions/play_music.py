@@ -4,7 +4,21 @@ import time
 import random
 import difflib
 import traceback
+import json
 from pathlib import Path
+from core.api.music_handler import (
+    build_track_catalog,
+    ensure_cached_ogg,
+    get_netease_track_stream_url,
+    get_track_id,
+    get_track_stream_url,
+    register_netease_track,
+)
+from core.providers.music.netease_cli import (
+    NeteaseCliError,
+    NeteaseCliProvider,
+    first_playable,
+)
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType, ContentType
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from typing import TYPE_CHECKING
@@ -20,13 +34,13 @@ play_music_function_desc = {
     "type": "function",
     "function": {
         "name": "play_music",
-        "description": "当用户要求播放音乐、歌曲时调用。",
+        "description": "当用户要求播放指定歌曲、每日推荐或红心收藏音乐时调用。",
         "parameters": {
             "type": "object",
             "properties": {
                 "song_name": {
                     "type": "string",
-                    "description": "歌曲名称，如果用户没有指定具体歌名则为'random', 明确指定的时返回音乐的名字 示例: ```用户:播放两只老虎\n参数：两只老虎``` ```用户:播放音乐 \n参数：random ```",
+                    "description": "歌曲名称；每日推荐传'daily'；红心收藏传'favorite'；没有指定则传'random'。",
                 }
             },
             "required": ["song_name"],
@@ -126,6 +140,11 @@ async def handle_music_command(conn: "ConnectionHandler", text):
     initialize_music_handler(conn)
     global MUSIC_CACHE
 
+    music_source = MUSIC_CACHE.get("music_config", {}).get("source", "local")
+    if music_source == "netease":
+        await play_netease_music(conn, text)
+        return True
+
     """处理音乐播放指令"""
     clean_text = re.sub(r"[^\w\s]", "", text).strip()
     conn.logger.bind(tag=TAG).debug(f"检查是否是音乐命令: {clean_text}")
@@ -151,6 +170,51 @@ async def handle_music_command(conn: "ConnectionHandler", text):
     return True
 
 
+def _netease_request_type(text):
+    normalized = re.sub(r"^(播放音乐|播放歌曲|播放|听)", "", text).strip().lower()
+    if normalized in {"daily", "random"} or any(
+        keyword in normalized for keyword in ("每日推荐", "日推", "今日推荐")
+    ):
+        return "daily", ""
+    if normalized == "favorite" or any(
+        keyword in normalized
+        for keyword in ("红心", "我喜欢的音乐", "收藏的音乐", "收藏歌曲")
+    ):
+        return "favorite", ""
+
+    return "search", normalized
+
+
+async def play_netease_music(conn: "ConnectionHandler", request):
+    provider = MUSIC_CACHE.get("netease_provider")
+    if provider is None:
+        provider = NeteaseCliProvider(conn.config)
+        MUSIC_CACHE["netease_provider"] = provider
+
+    request_type, query = _netease_request_type(request)
+    if request_type == "daily":
+        tracks = await provider.daily()
+    elif request_type == "favorite":
+        tracks = await provider.favorite_tracks()
+    else:
+        if not query:
+            raise NeteaseCliError("请告诉我想播放的歌曲名称")
+        tracks = await provider.search(query)
+
+    track = first_playable(tracks)
+    if track is None:
+        raise NeteaseCliError("没有找到当前账号可播放的歌曲")
+
+    token = register_netease_track(conn.config, track)
+    stream_url = get_netease_track_stream_url(conn.config, token)
+    artist_names = "、".join(
+        artist.get("name", "") for artist in track.get("artists", []) if artist.get("name")
+    )
+    title = track.get("name", "网易云音乐")
+    display_title = f"{title} - {artist_names}" if artist_names else title
+    await _send_music_playback(conn, token, display_title, stream_url)
+
+
 def _get_random_play_prompt(song_name):
     """生成随机播放引导语"""
     # 移除文件扩展名
@@ -173,10 +237,7 @@ async def play_local_music(conn: "ConnectionHandler", specific_file=None):
     """播放本地音乐文件"""
     try:
         if not os.path.exists(MUSIC_CACHE["music_dir"]):
-            conn.logger.bind(tag=TAG).error(
-                f"音乐目录不存在: " + MUSIC_CACHE["music_dir"]
-            )
-            return
+            raise FileNotFoundError(f"音乐目录不存在: {MUSIC_CACHE['music_dir']}")
 
         # 确保路径正确性
         if specific_file:
@@ -184,51 +245,74 @@ async def play_local_music(conn: "ConnectionHandler", specific_file=None):
             music_path = os.path.join(MUSIC_CACHE["music_dir"], specific_file)
         else:
             if not MUSIC_CACHE["music_files"]:
-                conn.logger.bind(tag=TAG).error("未找到MP3音乐文件")
-                return
+                raise FileNotFoundError("音乐目录中没有找到支持的音乐文件")
             selected_music = random.choice(MUSIC_CACHE["music_files"])
             music_path = os.path.join(MUSIC_CACHE["music_dir"], selected_music)
 
         if not os.path.exists(music_path):
             conn.logger.bind(tag=TAG).error(f"选定的音乐文件不存在: {music_path}")
             return
-        text = _get_random_play_prompt(selected_music)
-        conn.tts.store_tts_text(conn.sentence_id, text)
-        # conn.dialogue.put(Message(role="assistant", content=text))
+        relative_path = Path(selected_music).as_posix()
+        track_id = get_track_id(relative_path)
+        track = build_track_catalog(conn.config).get(track_id)
+        if track is None:
+            raise RuntimeError("选定的音乐不在可播放目录中")
 
-        if conn.intent_type == "intent_llm":
-            conn.tts.tts_text_queue.put(
-                TTSMessageDTO(
-                    sentence_id=conn.sentence_id,
-                    sentence_type=SentenceType.FIRST,
-                    content_type=ContentType.ACTION,
-                )
-            )
-        conn.tts.tts_text_queue.put(
-            TTSMessageDTO(
-                sentence_id=conn.sentence_id,
-                sentence_type=SentenceType.MIDDLE,
-                content_type=ContentType.TEXT,
-                content_detail=text,
-            )
-        )
-        conn.tts.tts_text_queue.put(
-            TTSMessageDTO(
-                sentence_id=conn.sentence_id,
-                sentence_type=SentenceType.MIDDLE,
-                content_type=ContentType.FILE,
-                content_file=music_path,
-            )
-        )
-        if conn.intent_type == "intent_llm":
-            conn.tts.tts_text_queue.put(
-                TTSMessageDTO(
-                    sentence_id=conn.sentence_id,
-                    sentence_type=SentenceType.LAST,
-                    content_type=ContentType.ACTION,
-                )
-            )
+        # Convert before sending the command so the ESP32 HTTP request gets a response
+        # immediately instead of timing out while ffmpeg prepares the complete file.
+        await ensure_cached_ogg(conn.config, track)
+        stream_url = get_track_stream_url(conn.config, track_id)
+
+        await _send_music_playback(conn, track_id, track["title"], stream_url)
 
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"播放音乐失败: {str(e)}")
         conn.logger.bind(tag=TAG).error(f"详细错误: {traceback.format_exc()}")
+        raise
+
+
+async def _send_music_playback(conn, track_id, title, stream_url):
+    text = _get_random_play_prompt(title)
+    conn.tts.store_tts_text(conn.sentence_id, text)
+
+    if conn.intent_type == "intent_llm":
+        conn.tts.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id=conn.sentence_id,
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            )
+        )
+    conn.tts.tts_text_queue.put(
+        TTSMessageDTO(
+            sentence_id=conn.sentence_id,
+            sentence_type=SentenceType.MIDDLE,
+            content_type=ContentType.TEXT,
+            content_detail=text,
+        )
+    )
+    if conn.intent_type == "intent_llm":
+        conn.tts.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id=conn.sentence_id,
+                sentence_type=SentenceType.LAST,
+                content_type=ContentType.ACTION,
+            )
+        )
+
+    await conn.websocket.send(
+        json.dumps(
+            {
+                "type": "media",
+                "action": "play",
+                "track": {
+                    "id": track_id,
+                    "title": title,
+                    "url": stream_url,
+                    "format": "ogg-opus",
+                },
+            },
+            ensure_ascii=False,
+        )
+    )
+    conn.logger.bind(tag=TAG).info(f"已下发独立音乐播放命令: {title}")

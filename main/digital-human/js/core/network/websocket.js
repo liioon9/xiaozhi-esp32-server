@@ -1,6 +1,6 @@
 // WebSocket消息处理模块
-import { getConfig, saveConnectionUrls } from '../../config/manager.js?v=0205';
-import { uiController } from '../../ui/controller.js?v=0205';
+import { getConfig, saveConnectionUrls } from '../../config/manager.js?v=1023';
+import { uiController } from '../../ui/controller.js?v=1023';
 import { log } from '../../utils/logger.js?v=0205';
 import { getAudioPlayer } from '../audio/player.js?v=0205';
 import { getAudioRecorder } from '../audio/recorder.js?v=0205';
@@ -18,6 +18,9 @@ export class WebSocketHandler {
         this.onChatMessage = null; // 新增：聊天消息回调
         this.currentSessionId = null;
         this.isRemoteSpeaking = false;
+        this.pendingMediaTrack = null;
+        this.mediaPlaybackTimer = null;
+        this.mediaPausedForTts = false;
     }
 
     // 发送hello握手消息
@@ -108,6 +111,8 @@ export class WebSocketHandler {
             this.handleTTSMessage(message);
         } else if (message.type === 'audio') {
             log(`收到音频控制消息: ${JSON.stringify(message)}`, 'info');
+        } else if (message.type === 'media') {
+            this.handleMediaMessage(message);
         } else if (message.type === 'stt') {
             log(`识别结果: ${message.text}`, 'info');
             // 检查是否需要绑定设备
@@ -175,6 +180,11 @@ export class WebSocketHandler {
             log('服务器开始发送语音', 'info');
             this.currentSessionId = message.session_id;
             this.isRemoteSpeaking = true;
+            if (this.mediaPlaybackTimer) {
+                clearTimeout(this.mediaPlaybackTimer);
+                this.mediaPlaybackTimer = null;
+            }
+            this.pauseMediaForTts();
             if (this.onSessionStateChange) {
                 this.onSessionStateChange(true);
             }
@@ -206,6 +216,11 @@ export class WebSocketHandler {
             audioPlayer.clearAllAudio();
 
             this.isRemoteSpeaking = false;
+            if (this.pendingMediaTrack) {
+                this.scheduleMediaPlayback(300);
+            } else if (this.mediaPausedForTts) {
+                this.resumeMediaAfterTts();
+            }
             if (this.onRecordButtonStateChange) {
                 this.onRecordButtonStateChange(false);
             }
@@ -219,6 +234,111 @@ export class WebSocketHandler {
                 this.ttsSentenceCount = 0; // 重置计数器
             }, 1000); // 1秒延迟，确保所有句子都完成
         }
+    }
+
+    handleMediaMessage(message) {
+        const action = message.action;
+        if (action === 'stop') {
+            this.pendingMediaTrack = null;
+            this.mediaPausedForTts = false;
+            if (this.mediaPlaybackTimer) {
+                clearTimeout(this.mediaPlaybackTimer);
+                this.mediaPlaybackTimer = null;
+            }
+            this.pauseMediaPlayback(true);
+            log('已停止独立音乐播放', 'info');
+            return;
+        }
+
+        if (action !== 'play' || !message.track?.url) {
+            log('忽略不完整的音乐播放消息', 'warning');
+            return;
+        }
+
+        let mediaUrl;
+        try {
+            mediaUrl = new URL(message.track.url, window.location.href);
+            if (!['http:', 'https:'].includes(mediaUrl.protocol)) {
+                throw new Error('unsupported URL protocol');
+            }
+        } catch (error) {
+            log('网易云音乐地址无效', 'error');
+            return;
+        }
+
+        this.pendingMediaTrack = {
+            url: mediaUrl.toString(),
+            title: message.track.title || '网易云音乐'
+        };
+        this.scheduleMediaPlayback(this.isRemoteSpeaking ? 0 : 1200);
+    }
+
+    scheduleMediaPlayback(delayMs) {
+        if (this.mediaPlaybackTimer) {
+            clearTimeout(this.mediaPlaybackTimer);
+        }
+        this.mediaPlaybackTimer = setTimeout(() => {
+            this.mediaPlaybackTimer = null;
+            if (!this.pendingMediaTrack) return;
+            if (this.isRemoteSpeaking) {
+                return;
+            }
+            this.startMediaPlayback(this.pendingMediaTrack);
+            this.pendingMediaTrack = null;
+        }, delayMs);
+    }
+
+    async startMediaPlayback(track) {
+        const audio = document.getElementById('mediaAudio');
+        const panel = document.getElementById('mediaPlayerPanel');
+        const title = document.getElementById('mediaPlayerTitle');
+        if (!audio || !panel || !title) {
+            log('页面缺少音乐播放器控件', 'error');
+            return;
+        }
+
+        audio.pause();
+        audio.src = track.url;
+        title.textContent = track.title;
+        panel.hidden = false;
+        this.mediaPausedForTts = false;
+        try {
+            await audio.play();
+            log(`开始播放独立音乐：${track.title}`, 'success');
+        } catch (error) {
+            log(`浏览器未自动播放音乐，请点击播放器播放按钮（${error.name || '播放失败'}）`, 'warning');
+        }
+    }
+
+    pauseMediaPlayback(clearSource = false) {
+        const audio = document.getElementById('mediaAudio');
+        if (!audio) return;
+        audio.pause();
+        if (clearSource) {
+            audio.removeAttribute('src');
+            audio.load();
+            const panel = document.getElementById('mediaPlayerPanel');
+            if (panel) panel.hidden = true;
+        }
+    }
+
+    pauseMediaForTts() {
+        const audio = document.getElementById('mediaAudio');
+        if (!audio || audio.paused || !audio.src) return;
+        this.mediaPausedForTts = true;
+        audio.pause();
+    }
+
+    resumeMediaAfterTts() {
+        const audio = document.getElementById('mediaAudio');
+        this.mediaPausedForTts = false;
+        if (!audio || !audio.src) return;
+        setTimeout(() => {
+            if (this.isRemoteSpeaking || !audio.paused) return;
+            audio.play().catch(error => {
+                log(`助手回复结束，音乐恢复播放失败（${error.name || '播放失败'}）`, 'warning');
+            });
+        }, 300);
     }
 
     // 启动Live2D说话动画

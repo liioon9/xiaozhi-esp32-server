@@ -156,11 +156,22 @@ plugins:
     base_url: http://homeassistant.local:8123
     api_key: 你的home assistant api访问令牌
   play_music:
+    source: "netease"  # local 使用本地音乐；netease 使用网易云官方开放平台
     music_dir: "./music"  # 音乐文件存放路径，将从该目录及子目录下搜索音乐文件
+    cache_dir: "./data/music_cache"  # ESP32 使用的 Ogg Opus 转换缓存
+    # ESP32 可访问的 HTTP 地址；留空时从 server.websocket 的主机名和 http_port 自动生成
+    stream_base_url: ""
+    remote_url_ttl_seconds: 600  # 下发给设备的随机播放地址有效期
+    netease:
+      cli_command: "ncm-cli"
+      log_path: "/root/.config/ncm-cli/app.log"
+      command_timeout: 15
     music_ext: # 音乐文件类型，p3格式效率最高
       - ".mp3"
       - ".wav"
       - ".p3"
+      - ".ogg"
+      - ".opus"
     refresh_time: 300 # 刷新音乐列表的时间间隔，单位为秒
   search_from_ragflow:
     # 知识库的描述信息，方便大语言模型知道什么时候调用

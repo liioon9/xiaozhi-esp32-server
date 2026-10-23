@@ -46,8 +46,11 @@ export function loadConfig() {
     }
 
     const savedOtaUrl = localStorage.getItem('xz_tester_otaUrl');
-    if (savedOtaUrl) {
+    const defaultOtaUrl = `${window.location.protocol}//${window.location.hostname}:8003/xiaozhi/ota/`;
+    if (savedOtaUrl && !/^https?:\/\/(localhost|127\.0\.0\.1):8002\/xiaozhi\/ota\/?$/i.test(savedOtaUrl)) {
         otaUrlInput.value = savedOtaUrl;
+    } else {
+        otaUrlInput.value = defaultOtaUrl;
     }
 
     const savedWakewordWsUrl = localStorage.getItem('xz_tester_wakewordWsUrl');

@@ -4,7 +4,10 @@ version: '3'
 services:
   # Server模块
   xiaozhi-esp32-server:
-    image: ghcr.nju.edu.cn/xinnan-tech/xiaozhi-esp32-server:server_latest
+    build:
+      context: .
+      dockerfile: Dockerfile.music
+    image: xiaozhi-esp32-server:music-local
     container_name: xiaozhi-esp32-server
     depends_on:
       - xiaozhi-esp32-server-db
@@ -22,8 +25,12 @@ services:
     environment:
       - TZ=Asia/Shanghai
     volumes:
+      # 开发环境使用当前源码，确保本地的音乐播放改动进入容器
+      - ./:/opt/xiaozhi-esp32-server
       # 配置文件目录
       - ./data:/opt/xiaozhi-esp32-server/data
+      # 网易云 CLI 凭据和扫码登录态
+      - ./data/ncm-cli:/root/.config/ncm-cli
       # 模型文件挂接，很重要
       - ./models/SenseVoiceSmall/model.pt:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall/model.pt
 

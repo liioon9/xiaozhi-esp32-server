@@ -1,0 +1,11 @@
+FROM node:22-bookworm-slim AS ncm-runtime
+
+RUN npm install -g @music163/ncm-cli@0.1.7 --no-audit --no-fund \
+    --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000
+
+FROM ghcr.nju.edu.cn/xinnan-tech/xiaozhi-esp32-server:server_latest
+
+COPY --from=ncm-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=ncm-runtime /usr/local/lib/node_modules/@music163/ncm-cli /usr/local/lib/node_modules/@music163/ncm-cli
+
+RUN ln -s /usr/local/lib/node_modules/@music163/ncm-cli/dist/index.js /usr/local/bin/ncm-cli
