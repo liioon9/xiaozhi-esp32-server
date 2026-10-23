@@ -95,6 +95,9 @@ async def control_music(conn: "ConnectionHandler", action: str):
     await conn.websocket.send(
         json.dumps({"type": "media", "action": action}, ensure_ascii=False)
     )
+    if action == "stop":
+        conn.music_queue = []
+        conn.music_queue_index = -1
     response = {
         "pause": "好的，音乐暂停了。",
         "resume": "好的，继续播放音乐。",
@@ -239,10 +242,30 @@ async def play_netease_music(conn: "ConnectionHandler", request):
             raise NeteaseCliError("请告诉我想播放的歌曲名称")
         tracks = await provider.search(query)
 
-    track = first_playable(tracks)
+    queue = [track for track in tracks if first_playable([track])]
+    track = queue[0] if queue else None
     if track is None:
         raise NeteaseCliError("没有找到当前账号可播放的歌曲")
 
+    conn.music_queue = queue
+    conn.music_queue_index = 0
+    await _play_netease_track(conn, track)
+
+
+async def play_next_netease_music(conn: "ConnectionHandler"):
+    queue = getattr(conn, "music_queue", [])
+    next_index = getattr(conn, "music_queue_index", -1) + 1
+    if next_index >= len(queue):
+        conn.music_queue = []
+        conn.music_queue_index = -1
+        return False
+
+    conn.music_queue_index = next_index
+    await _play_netease_track(conn, queue[next_index])
+    return True
+
+
+async def _play_netease_track(conn: "ConnectionHandler", track):
     token = register_netease_track(conn.config, track)
     stream_url = get_netease_track_stream_url(conn.config, token)
     artist_names = "、".join(

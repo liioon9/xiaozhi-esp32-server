@@ -1,6 +1,6 @@
 // WebSocket消息处理模块
-import { getConfig, saveConnectionUrls } from '../../config/manager.js?v=1024';
-import { uiController } from '../../ui/controller.js?v=1024';
+import { getConfig, saveConnectionUrls } from '../../config/manager.js?v=1025';
+import { uiController } from '../../ui/controller.js?v=1025';
 import { log } from '../../utils/logger.js?v=0205';
 import { getAudioPlayer } from '../audio/player.js?v=0205';
 import { getAudioRecorder } from '../audio/recorder.js?v=0205';
@@ -318,6 +318,7 @@ export class WebSocketHandler {
 
         audio.pause();
         audio.src = track.url;
+        audio.onended = () => this.requestNextMediaTrack();
         title.textContent = track.title;
         panel.hidden = false;
         this.mediaPausedForTts = false;
@@ -359,6 +360,15 @@ export class WebSocketHandler {
         }).catch(error => {
             log(`浏览器未恢复播放音乐（${error.name || '播放失败'}）`, 'warning');
         });
+    }
+
+    requestNextMediaTrack() {
+        if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+            log('音乐播放结束，但与服务器的连接已断开', 'warning');
+            return;
+        }
+        this.websocket.send(JSON.stringify({ type: 'media', action: 'ended' }));
+        log('当前歌曲播放结束，正在请求下一首', 'info');
     }
 
     resumeMediaAfterTts() {
