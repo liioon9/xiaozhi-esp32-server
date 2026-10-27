@@ -11,11 +11,12 @@
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
     section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; box-shadow: 0 1px 3px #0f172a0d; } section.full { grid-column: 1 / -1; }
     h2 { font-size: 18px; margin: 0 0 14px; } label { display: block; font-size: 14px; margin: 12px 0 5px; }
-    input, select, textarea, button { box-sizing: border-box; font: inherit; border-radius: 7px; } input, select, textarea { width: 100%; padding: 9px; border: 1px solid #cbd5e1; } textarea { min-height: 420px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.45; }
+    input, select, textarea, button { box-sizing: border-box; font: inherit; border-radius: 7px; } input, select, textarea { width: 100%; padding: 9px; border: 1px solid #cbd5e1; } textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.45; } #service-config { min-height: 420px; } #prompt { min-height: 180px; } .list-input { min-height: 90px; }
     button { border: 0; background: #2563eb; color: #fff; padding: 9px 13px; cursor: pointer; margin: 8px 8px 0 0; } button.danger { background: #dc2626; } button.secondary { background: #475569; }
     .status { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid #eef2f7; }
     .badge { padding: 3px 8px; border-radius: 99px; background: #fee2e2; color: #991b1b; font-size: 13px; } .badge.ok { background: #dcfce7; color: #166534; }
     #qr { width: 180px; display: none; margin: 12px 0; } #notice { min-height: 24px; margin: 18px 0 0; color: #0369a1; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap: 0 16px; } .form-grid .wide { grid-column: 1 / -1; } .switches { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px; } .switches label { display: flex; gap: 6px; align-items: center; margin: 0; } details summary { cursor: pointer; color: #334155; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -47,10 +48,34 @@
         <button onclick="saveMusicConfig()">保存并重启小智服务</button>
       </section>
       <section class="full">
-        <h2>xiaozhi-service 配置</h2>
-        <p class="hint">可编辑提示词、模块选择、模型、唤醒词和工具配置。敏感值会显示为 <code>&lt;REDACTED&gt;</code>；保持该标记不变即可保留服务器中的原值。</p>
-        <textarea id="service-config" spellcheck="false" aria-label="xiaozhi-service YAML 配置"></textarea>
-        <button onclick="saveServiceConfig()">保存完整配置并重启小智服务</button>
+        <h2>xiaozhi-service 常用配置</h2>
+        <p class="hint">表单保存后会重启小智服务。模型下拉选项来自当前服务器配置。</p>
+        <div class="form-grid">
+          <label class="wide">系统提示词<textarea id="prompt" spellcheck="false"></textarea></label>
+          <label>唤醒词（每行一个）<textarea id="wakeup-words" class="list-input" spellcheck="false"></textarea></label>
+          <label>退出指令（每行一个）<textarea id="exit-commands" class="list-input" spellcheck="false"></textarea></label>
+          <div class="wide"><label>模块与模型</label><div id="module-fields" class="form-grid"></div></div>
+          <div class="wide switches">
+            <label><input id="enable-greeting" type="checkbox"> 唤醒后回复</label>
+            <label><input id="enable-wakeup-cache" type="checkbox"> 唤醒词加速缓存</label>
+            <label><input id="enable-websocket-ping" type="checkbox"> WebSocket 心跳</label>
+          </div>
+          <label>无语音断开时间（秒）<input id="no-voice-time" type="number" min="0" max="3600"></label>
+          <label>TTS 超时（秒）<input id="tts-timeout" type="number" min="1" max="120"></label>
+          <label>工具调用超时（秒）<input id="tool-timeout" type="number" min="1" max="300"></label>
+          <label>设备 WebSocket 地址<input id="server-websocket"></label>
+          <label>视觉分析地址<input id="server-vision"></label>
+          <label>时区偏移<input id="server-timezone" placeholder="+8"></label>
+        </div>
+        <button onclick="saveFormConfig()">保存表单配置并重启小智服务</button>
+      </section>
+      <section class="full">
+        <details>
+          <summary>高级配置（YAML）</summary>
+          <p class="hint">用于表单未覆盖的配置。敏感值会显示为 <code>&lt;REDACTED&gt;</code>；保持该标记不变即可保留服务器中的原值。</p>
+          <textarea id="service-config" spellcheck="false" aria-label="xiaozhi-service YAML 配置"></textarea>
+          <button onclick="saveServiceConfig()">保存高级配置并重启小智服务</button>
+        </details>
       </section>
     </div>
     <p id="notice"></p>
@@ -62,13 +87,17 @@
     const setBadge = (selector, value) => { const element = document.querySelector(selector); element.textContent = value; element.className = `badge ${value === 'active' || value === '已绑定' ? 'ok' : ''}`; };
     async function loadStatus() { try { const data = await request('/api/status'); setBadge('#xiaozhi-state', data.services['xiaozhi-server']); setBadge('#ncm-state', data.services['ncm-api']); setBadge('#binding', data.netease_bound ? '已绑定' : '未绑定'); document.querySelector('#source').value = data.music.source; document.querySelector('#api-base-url').value = data.music.api_base_url; document.querySelector('#api-timeout').value = data.music.api_timeout_seconds; document.querySelector('#play-level').value = data.music.play_level; } catch (error) { notice(error.message); } }
     async function loadServiceConfig() { try { const data = await request('/api/config'); document.querySelector('#service-config').value = data.yaml; } catch (error) { notice(error.message); } }
+    const linesToList = value => value.split('\n').map(item => item.trim()).filter(Boolean);
+    function renderModuleFields(data) { const container = document.querySelector('#module-fields'); container.replaceChildren(); Object.entries(data.selected_module).forEach(([key, selected]) => { const label = document.createElement('label'); label.textContent = key; const select = document.createElement('select'); select.id = `module-${key}`; (data.module_options[key] || []).forEach(optionValue => { const option = document.createElement('option'); option.value = optionValue; option.textContent = optionValue; option.selected = optionValue === selected; select.appendChild(option); }); label.appendChild(select); container.appendChild(label); }); }
+    async function loadFormConfig() { try { const data = await request('/api/form-config'); document.querySelector('#prompt').value = data.prompt; document.querySelector('#wakeup-words').value = data.wakeup_words.join('\n'); document.querySelector('#exit-commands').value = data.exit_commands.join('\n'); renderModuleFields(data); document.querySelector('#enable-greeting').checked = data.behavior.enable_greeting; document.querySelector('#enable-wakeup-cache').checked = data.behavior.enable_wakeup_words_response_cache; document.querySelector('#enable-websocket-ping').checked = data.behavior.enable_websocket_ping; document.querySelector('#no-voice-time').value = data.behavior.close_connection_no_voice_time; document.querySelector('#tts-timeout').value = data.behavior.tts_timeout; document.querySelector('#tool-timeout').value = data.behavior.tool_call_timeout; document.querySelector('#server-websocket').value = data.server.websocket; document.querySelector('#server-vision').value = data.server.vision_explain; document.querySelector('#server-timezone').value = data.server.timezone_offset; } catch (error) { notice(error.message); } }
     async function restartService(service) { try { await request(`/api/services/${service}/restart`, { method: 'POST' }); notice('服务已重启。'); await loadStatus(); } catch (error) { notice(error.message); } }
     async function startQr() { try { clearInterval(pollTimer); const data = await request('/api/netease/qr/start', { method: 'POST' }); const qr = document.querySelector('#qr'); qr.src = data.qrimg; qr.style.display = 'block'; document.querySelector('#qr-tip').textContent = '请使用网易云音乐 App 扫码确认。'; pollTimer = setInterval(pollQr, 1800); } catch (error) { notice(error.message); } }
     async function pollQr() { try { const data = await request('/api/netease/qr/poll', { method: 'POST' }); if (data.state === 'bound') { clearInterval(pollTimer); document.querySelector('#qr').style.display = 'none'; document.querySelector('#qr-tip').textContent = ''; notice('网易云已绑定，小智服务已重启。'); await loadStatus(); } else if (data.state === 'expired') { clearInterval(pollTimer); notice('二维码已过期，请重新生成。'); } } catch (error) { clearInterval(pollTimer); notice(error.message); } }
     async function unbind() { if (!confirm('确定解除网易云绑定吗？')) return; try { await request('/api/netease/unbind', { method: 'POST' }); notice('已解除绑定，小智服务已重启。'); await loadStatus(); } catch (error) { notice(error.message); } }
     async function saveMusicConfig() { try { await request('/api/music-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: document.querySelector('#source').value, provider: 'api_enhanced', api_base_url: document.querySelector('#api-base-url').value, api_timeout_seconds: Number(document.querySelector('#api-timeout').value), play_level: document.querySelector('#play-level').value }) }); notice('配置已保存，小智服务已重启。'); await loadStatus(); } catch (error) { notice(error.message); } }
+    async function saveFormConfig() { if (!confirm('保存后会重启小智服务，确定继续吗？')) return; try { const selected_module = {}; document.querySelectorAll('#module-fields select').forEach(item => { selected_module[item.id.replace('module-', '')] = item.value; }); await request('/api/form-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: document.querySelector('#prompt').value, wakeup_words: linesToList(document.querySelector('#wakeup-words').value), exit_commands: linesToList(document.querySelector('#exit-commands').value), selected_module, behavior: { enable_greeting: document.querySelector('#enable-greeting').checked, enable_wakeup_words_response_cache: document.querySelector('#enable-wakeup-cache').checked, enable_websocket_ping: document.querySelector('#enable-websocket-ping').checked, close_connection_no_voice_time: Number(document.querySelector('#no-voice-time').value), tts_timeout: Number(document.querySelector('#tts-timeout').value), tool_call_timeout: Number(document.querySelector('#tool-timeout').value) }, server: { websocket: document.querySelector('#server-websocket').value, vision_explain: document.querySelector('#server-vision').value, timezone_offset: document.querySelector('#server-timezone').value } }) }); notice('表单配置已保存，小智服务已重启。'); await loadStatus(); await loadFormConfig(); await loadServiceConfig(); } catch (error) { notice(error.message); } }
     async function saveServiceConfig() { if (!confirm('保存后会重启小智服务。敏感值请保持 <REDACTED> 不变，确定继续吗？')) return; try { await request('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ yaml: document.querySelector('#service-config').value }) }); notice('完整配置已保存，小智服务已重启。'); await loadStatus(); await loadServiceConfig(); } catch (error) { notice(error.message); } }
-    loadStatus(); loadServiceConfig();
+    loadStatus(); loadFormConfig(); loadServiceConfig();
   </script>
 </body>
 </html>

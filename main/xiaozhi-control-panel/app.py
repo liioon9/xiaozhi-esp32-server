@@ -29,6 +29,13 @@ QR_TTL_SECONDS = 300
 REDACTED = "<REDACTED>"
 SENSITIVE_KEY_MARKERS = ("api_key", "secret", "token", "password", "authorization", "cookie", "credential", "private_key")
 MISSING = object()
+MODULE_KEYS = ("VAD", "ASR", "LLM", "VLLM", "TTS", "Memory", "Intent")
+BOOLEAN_SETTINGS = ("enable_greeting", "enable_wakeup_words_response_cache", "enable_websocket_ping")
+NUMBER_SETTINGS = {
+    "close_connection_no_voice_time": (0, 3600),
+    "tts_timeout": (1, 120),
+    "tool_call_timeout": (1, 300),
+}
 
 
 class ControlPanel:
@@ -139,8 +146,89 @@ class ControlPanel:
         if not isinstance(submitted, dict):
             raise ValueError("配置根节点必须是对象")
         restored = self._restore_redacted_values(submitted, self._effective_config())
-        diff = self._config_diff(self._load_yaml(self.base_config_path), restored)
+        self._save_effective_config(restored)
+
+    def _save_effective_config(self, config):
+        diff = self._config_diff(self._load_yaml(self.base_config_path), config)
         self._save_config({} if diff is MISSING else diff)
+
+    @staticmethod
+    def _string_list(value, field, limit=50):
+        if not isinstance(value, list) or len(value) > limit:
+            raise ValueError(f"{field} 格式无效")
+        if any(not isinstance(item, str) or not item.strip() or len(item) > 200 for item in value):
+            raise ValueError(f"{field} 包含无效内容")
+        return [item.strip() for item in value]
+
+    def get_form_config(self):
+        config = self._effective_config()
+        selected = config.get("selected_module", {})
+        options = {
+            key: sorted(config.get(key, {}).keys()) if isinstance(config.get(key), dict) else []
+            for key in MODULE_KEYS
+        }
+        return {
+            "prompt": config.get("prompt", ""),
+            "wakeup_words": config.get("wakeup_words", []),
+            "exit_commands": config.get("exit_commands", []),
+            "selected_module": {key: selected.get(key, "") for key in MODULE_KEYS},
+            "module_options": options,
+            "behavior": {
+                **{key: bool(config.get(key, False)) for key in BOOLEAN_SETTINGS},
+                **{key: config.get(key, default[0]) for key, default in NUMBER_SETTINGS.items()},
+            },
+            "server": {
+                "websocket": config.get("server", {}).get("websocket", ""),
+                "vision_explain": config.get("server", {}).get("vision_explain", ""),
+                "timezone_offset": config.get("server", {}).get("timezone_offset", "+8"),
+            },
+        }
+
+    def update_form_config(self, values):
+        if not isinstance(values, dict):
+            raise ValueError("表单数据无效")
+        config = self._effective_config()
+        prompt = values.get("prompt")
+        if not isinstance(prompt, str) or len(prompt) > 60000:
+            raise ValueError("提示词格式无效")
+        config["prompt"] = prompt
+        config["wakeup_words"] = self._string_list(values.get("wakeup_words"), "唤醒词")
+        config["exit_commands"] = self._string_list(values.get("exit_commands"), "退出指令")
+
+        selected = values.get("selected_module")
+        if not isinstance(selected, dict):
+            raise ValueError("模块选择无效")
+        config.setdefault("selected_module", {})
+        for key in MODULE_KEYS:
+            choice = selected.get(key)
+            available = config.get(key, {})
+            if not isinstance(choice, str) or choice not in available:
+                raise ValueError(f"{key} 模块选择无效")
+            config["selected_module"][key] = choice
+
+        behavior = values.get("behavior")
+        if not isinstance(behavior, dict):
+            raise ValueError("行为设置无效")
+        for key in BOOLEAN_SETTINGS:
+            if not isinstance(behavior.get(key), bool):
+                raise ValueError(f"{key} 必须为布尔值")
+            config[key] = behavior[key]
+        for key, (minimum, maximum) in NUMBER_SETTINGS.items():
+            number = behavior.get(key)
+            if not isinstance(number, int) or isinstance(number, bool) or not minimum <= number <= maximum:
+                raise ValueError(f"{key} 超出允许范围")
+            config[key] = number
+
+        server = values.get("server")
+        if not isinstance(server, dict):
+            raise ValueError("服务地址无效")
+        config.setdefault("server", {})
+        for key in ("websocket", "vision_explain", "timezone_offset"):
+            value = server.get(key)
+            if not isinstance(value, str) or len(value) > 500:
+                raise ValueError(f"server.{key} 格式无效")
+            config["server"][key] = value.strip()
+        self._save_effective_config(config)
 
     @staticmethod
     def _music_config(config):
@@ -309,6 +397,19 @@ def create_app(panel):
     async def get_config(_request):
         return json_response({"yaml": panel.get_redacted_config_text()})
 
+    async def get_form_config(_request):
+        return json_response(panel.get_form_config())
+
+    async def put_form_config(request):
+        try:
+            panel.update_form_config(await request.json())
+            panel.restart_service("xiaozhi-server")
+            return json_response({"ok": True})
+        except (ValueError, json.JSONDecodeError):
+            return json_response({"error": "表单配置无效，未保存任何更改"}, 400)
+        except subprocess.CalledProcessError:
+            return json_response({"error": "配置已保存，但重启服务失败"}, 500)
+
     async def put_config(request):
         try:
             panel.update_config_text((await request.json()).get("yaml"))
@@ -366,6 +467,8 @@ def create_app(panel):
     app.router.add_put("/api/music-config", put_music_config)
     app.router.add_get("/api/config", get_config)
     app.router.add_put("/api/config", put_config)
+    app.router.add_get("/api/form-config", get_form_config)
+    app.router.add_put("/api/form-config", put_form_config)
     app.router.add_post("/api/services/{service}/restart", restart_service)
     app.router.add_post("/api/netease/qr/start", start_qr)
     app.router.add_post("/api/netease/qr/poll", poll_qr)
