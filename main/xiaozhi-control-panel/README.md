@@ -27,4 +27,4 @@ systemctl status xiaozhi-control-panel
 
 这个服务以 root 运行，是为了安全地写入仅 root 可读的网易云环境文件并重启固定服务。不要将控制台监听地址改为公网地址；如果未来要从固定公网 IP 访问，应由 Nginx 和安全组共同实施 IP 白名单。
 
-完整配置编辑器会用 `<REDACTED>` 替换 API Key、Token、Cookie 等敏感值。保持标记不变后保存，控制台会保留服务器上的原值；因此敏感凭据不会发送到浏览器或写入控制台日志。
+完整配置编辑器展示的是默认 `config.yaml` 与私有 `data/.config.yaml` 合并后的有效配置。保存时，控制台仅将相对默认配置的差异写回 `data/.config.yaml`。它会用 `<REDACTED>` 替换 API Key、Token、Cookie 等敏感值；保持标记不变后保存，控制台会保留服务器上的原值，因此敏感凭据不会发送到浏览器或写入控制台日志。

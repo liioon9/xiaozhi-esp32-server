@@ -7,6 +7,7 @@ configured reverse proxy with an IP allowlist.
 
 import argparse
 import asyncio
+from copy import deepcopy
 import json
 import os
 import subprocess
@@ -27,21 +28,52 @@ ALLOWED_LEVELS = {"standard", "higher", "exhigh", "lossless", "hires", "jyeffect
 QR_TTL_SECONDS = 300
 REDACTED = "<REDACTED>"
 SENSITIVE_KEY_MARKERS = ("api_key", "secret", "token", "password", "authorization", "cookie", "credential", "private_key")
+MISSING = object()
 
 
 class ControlPanel:
     def __init__(self, config_path, netease_env_path):
         self.config_path = Path(config_path)
+        self.base_config_path = self.config_path.parent.parent / "config.yaml"
         self.netease_env_path = Path(netease_env_path)
         self.yaml = YAML()
         self.yaml.preserve_quotes = True
         self.qr_session = None
 
-    def _load_config(self):
-        if not self.config_path.exists():
+    def _load_yaml(self, path):
+        if not path.exists():
             return {}
-        with self.config_path.open("r", encoding="utf-8") as file:
+        with path.open("r", encoding="utf-8") as file:
             return self.yaml.load(file) or {}
+
+    def _load_config(self):
+        return self._load_yaml(self.config_path)
+
+    @staticmethod
+    def _merge_config(base, override):
+        if not isinstance(base, dict) or not isinstance(override, dict):
+            return deepcopy(override)
+        merged = deepcopy(base)
+        for key, value in override.items():
+            merged[key] = ControlPanel._merge_config(merged[key], value) if key in merged else deepcopy(value)
+        return merged
+
+    @staticmethod
+    def _config_diff(base, value):
+        if isinstance(base, dict) and isinstance(value, dict):
+            diff = {}
+            for key, item in value.items():
+                if key not in base:
+                    diff[key] = deepcopy(item)
+                    continue
+                nested = ControlPanel._config_diff(base[key], item)
+                if nested is not MISSING:
+                    diff[key] = nested
+            return diff if diff else MISSING
+        return MISSING if base == value else deepcopy(value)
+
+    def _effective_config(self):
+        return self._merge_config(self._load_yaml(self.base_config_path), self._load_config())
 
     def _save_config(self, config):
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,7 +126,7 @@ class ControlPanel:
 
     def get_redacted_config_text(self):
         stream = StringIO()
-        self.yaml.dump(self._redact_config(self._load_config()), stream)
+        self.yaml.dump(self._redact_config(self._effective_config()), stream)
         return stream.getvalue()
 
     def update_config_text(self, text):
@@ -106,7 +138,9 @@ class ControlPanel:
             raise ValueError("YAML 格式无效") from error
         if not isinstance(submitted, dict):
             raise ValueError("配置根节点必须是对象")
-        self._save_config(self._restore_redacted_values(submitted, self._load_config()))
+        restored = self._restore_redacted_values(submitted, self._effective_config())
+        diff = self._config_diff(self._load_yaml(self.base_config_path), restored)
+        self._save_config({} if diff is MISSING else diff)
 
     @staticmethod
     def _music_config(config):
