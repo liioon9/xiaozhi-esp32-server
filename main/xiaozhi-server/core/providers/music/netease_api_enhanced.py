@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 
 import aiohttp
 
@@ -20,6 +21,20 @@ class NeteaseApiEnhancedProvider:
         self.timeout_seconds = int(netease_config.get("api_timeout_seconds", 15))
         self.cookie_env = str(netease_config.get("cookie_env", "NETEASE_COOKIE"))
         self.play_level = str(netease_config.get("play_level", "standard"))
+        self.metadata_cache_ttl_seconds = int(
+            netease_config.get("metadata_cache_ttl_seconds", 1800)
+        )
+        self.favorite_tracks_cache_ttl_seconds = int(
+            netease_config.get("favorite_tracks_cache_ttl_seconds", 300)
+        )
+        self._user_id_cache = None
+        self._user_id_cache_expires_at = 0.0
+        self._favorite_playlist_id_cache = None
+        self._favorite_playlist_id_cache_expires_at = 0.0
+        self._favorite_tracks_cache = None
+        self._favorite_tracks_cache_expires_at = 0.0
+        self._account_lock = asyncio.Lock()
+        self._favorite_tracks_lock = asyncio.Lock()
 
     async def _request(self, path, **params):
         if not self.base_url or "你的" in self.base_url:
@@ -102,20 +117,44 @@ class NeteaseApiEnhancedProvider:
         return self._normalize_tracks(self._extract_tracks(payload))[:limit]
 
     async def _user_id(self):
-        payload = await self._request("user/account")
-        profile = payload.get("profile", {})
-        user_id = profile.get("userId") or payload.get("account", {}).get("id")
-        if not user_id:
-            raise NeteaseCliError("无法获取网易云账号信息，请先登录")
-        return user_id
+        if self._user_id_cache and time.monotonic() < self._user_id_cache_expires_at:
+            return self._user_id_cache
+        async with self._account_lock:
+            if self._user_id_cache and time.monotonic() < self._user_id_cache_expires_at:
+                return self._user_id_cache
+            payload = await self._request("user/account")
+            profile = payload.get("profile", {})
+            user_id = profile.get("userId") or payload.get("account", {}).get("id")
+            if not user_id:
+                raise NeteaseCliError("无法获取网易云账号信息，请先登录")
+            self._user_id_cache = user_id
+            self._user_id_cache_expires_at = (
+                time.monotonic() + self.metadata_cache_ttl_seconds
+            )
+            return user_id
 
     async def favorite_playlist_id(self):
+        if (
+            self._favorite_playlist_id_cache
+            and time.monotonic() < self._favorite_playlist_id_cache_expires_at
+        ):
+            return self._favorite_playlist_id_cache
         user_id = await self._user_id()
-        payload = await self._request("user/playlist", uid=user_id, limit=1000)
-        for playlist in payload.get("playlist", []):
-            if playlist.get("specialType") == 5:
-                return playlist.get("id")
-        raise NeteaseCliError("没有获取到红心歌单")
+        async with self._account_lock:
+            if (
+                self._favorite_playlist_id_cache
+                and time.monotonic() < self._favorite_playlist_id_cache_expires_at
+            ):
+                return self._favorite_playlist_id_cache
+            payload = await self._request("user/playlist", uid=user_id, limit=1000)
+            for playlist in payload.get("playlist", []):
+                if playlist.get("specialType") == 5:
+                    self._favorite_playlist_id_cache = playlist.get("id")
+                    self._favorite_playlist_id_cache_expires_at = (
+                        time.monotonic() + self.metadata_cache_ttl_seconds
+                    )
+                    return self._favorite_playlist_id_cache
+            raise NeteaseCliError("没有获取到红心歌单")
 
     async def favorite_tracks(self, limit=1000):
         """Return the red-heart playlist in the order shown by NetEase Cloud Music.
@@ -125,11 +164,28 @@ class NeteaseApiEnhancedProvider:
         playlist's ordered ``trackIds`` list, so queue indexes map to the
         same next/previous order as the NetEase client.
         """
-        playlist_id = await self.favorite_playlist_id()
-        payload = await self._request(
-            "playlist/track/all", id=playlist_id, limit=limit, offset=0
+        cache_is_valid = (
+            self._favorite_tracks_cache is not None
+            and time.monotonic() < self._favorite_tracks_cache_expires_at
         )
-        return self._normalize_tracks(self._extract_tracks(payload))[:limit]
+        if cache_is_valid:
+            return self._favorite_tracks_cache[:limit]
+        async with self._favorite_tracks_lock:
+            cache_is_valid = (
+                self._favorite_tracks_cache is not None
+                and time.monotonic() < self._favorite_tracks_cache_expires_at
+            )
+            if cache_is_valid:
+                return self._favorite_tracks_cache[:limit]
+            playlist_id = await self.favorite_playlist_id()
+            payload = await self._request(
+                "playlist/track/all", id=playlist_id, limit=1000, offset=0
+            )
+            self._favorite_tracks_cache = self._normalize_tracks(self._extract_tracks(payload))
+            self._favorite_tracks_cache_expires_at = (
+                time.monotonic() + self.favorite_tracks_cache_ttl_seconds
+            )
+            return self._favorite_tracks_cache[:limit]
 
     async def search_artist_tracks(self, artist_name, limit=30):
         payload = await self._request("search", keywords=artist_name, limit=1, type=100)
@@ -150,12 +206,14 @@ class NeteaseApiEnhancedProvider:
         if not song_id:
             raise NeteaseCliError("歌曲缺少收藏 ID")
         await self._request("like", id=song_id, like="true")
+        self._favorite_tracks_cache_expires_at = 0.0
 
     async def dislike_track(self, track):
         song_id = track.get("originalId") or track.get("id")
         if not song_id:
             raise NeteaseCliError("歌曲缺少收藏 ID")
         await self._request("like", id=song_id, like="false")
+        self._favorite_tracks_cache_expires_at = 0.0
 
     async def resolve_play_url(self, track):
         song_id = track.get("originalId") or track.get("id")

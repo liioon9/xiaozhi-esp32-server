@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -100,16 +101,30 @@ class NeteaseApiEnhancedProviderTest(unittest.TestCase):
         )
 
         tracks = asyncio.run(provider.favorite_tracks(limit=3))
+        cached_tracks = asyncio.run(provider.favorite_tracks(limit=2))
 
         self.assertEqual([track["originalId"] for track in tracks], [30, 10, 20])
+        self.assertEqual([track["originalId"] for track in cached_tracks], [30, 10])
+        self.assertEqual(provider._request.await_count, 3)
         self.assertEqual(
             provider._request.await_args_list[-1].args,
             ("playlist/track/all",),
         )
         self.assertEqual(
             provider._request.await_args_list[-1].kwargs,
-            {"id": 99, "limit": 3, "offset": 0},
+            {"id": 99, "limit": 1000, "offset": 0},
         )
+
+    def test_like_invalidates_favorite_track_cache(self):
+        provider = NeteaseApiEnhancedProvider(self.config)
+        provider._favorite_tracks_cache = [{"id": "1"}]
+        provider._favorite_tracks_cache_expires_at = time.monotonic() + 60
+        provider._request = AsyncMock(return_value={"code": 200})
+
+        asyncio.run(provider.like_track({"id": "1", "originalId": 1}))
+
+        self.assertEqual(provider._favorite_tracks_cache_expires_at, 0.0)
+        provider._request.assert_awaited_once_with("like", id=1, like="true")
 
     def test_request_sends_cookie_from_environment_only_in_header(self):
         provider = NeteaseApiEnhancedProvider(self.config)

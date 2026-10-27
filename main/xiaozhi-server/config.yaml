@@ -179,6 +179,10 @@ plugins:
       # 登录 Cookie 仅从运行 xiaozhi-server 的环境变量读取；不要写进此文件、日志或 Git。
       cookie_env: "NETEASE_COOKIE"
       play_level: "standard"
+      # 减少账号和歌单元数据调用；登录重启、到期或收藏变动后会自动刷新。
+      metadata_cache_ttl_seconds: 1800
+      # 红心歌单播放队列缓存；不缓存临时歌曲播放 URL。
+      favorite_tracks_cache_ttl_seconds: 300
     music_ext: # 音乐文件类型，p3格式效率最高
       - ".mp3"
       - ".wav"
