@@ -84,6 +84,11 @@ class NeteaseApiEnhancedProvider:
 
     @staticmethod
     def _normalize_track(track):
+        # ``playmode/intelligence/list`` wraps each recommendation in a
+        # ``songInfo`` object.  Its outer item only carries recommendation
+        # metadata, so reading it directly loses the song name and artists.
+        if isinstance(track.get("songInfo"), dict):
+            track = track["songInfo"]
         song_id = track.get("id")
         if song_id is None:
             return None

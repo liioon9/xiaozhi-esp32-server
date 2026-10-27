@@ -73,6 +73,33 @@ class NeteaseApiEnhancedProviderTest(unittest.TestCase):
             "song/url/v1", id=1, level="standard", unblock="false"
         )
 
+    def test_heartbeat_unwraps_song_info(self):
+        provider = NeteaseApiEnhancedProvider(self.config)
+        provider._request = AsyncMock(
+            return_value={
+                "code": 200,
+                "data": [
+                    {
+                        "id": 1,
+                        "recommended": True,
+                        "songInfo": {
+                            "id": 1,
+                            "name": "心动推荐歌曲",
+                            "ar": [{"name": "推荐歌手"}],
+                        },
+                    }
+                ],
+            }
+        )
+
+        tracks = asyncio.run(provider.heartbeat(playlist_id=99, song_id=1, limit=3))
+
+        self.assertEqual(tracks[0]["name"], "心动推荐歌曲")
+        self.assertEqual(tracks[0]["artists"], [{"name": "推荐歌手"}])
+        provider._request.assert_awaited_once_with(
+            "playmode/intelligence/list", id=1, pid=99, count=3
+        )
+
     def test_resolve_play_url_rejects_missing_url(self):
         provider = NeteaseApiEnhancedProvider(self.config)
         provider._request = AsyncMock(return_value={"code": 200, "data": [{"url": None}]})
