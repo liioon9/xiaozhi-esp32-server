@@ -4,7 +4,7 @@ import { getAudioPlayer } from './core/audio/player.js?v=0205';
 import { checkMicrophoneAvailability, isHttpNonLocalhost } from './core/audio/recorder.js?v=0205';
 import { initMcpTools } from './core/mcp/tools.js?v=0205';
 import { startWakewordBridgeListener } from './core/network/wakeword-bridge.js?v=0205';
-import { uiController } from './ui/controller.js?v=1025';
+import { uiController } from './ui/controller.js?v=1026';
 import { log } from './utils/logger.js?v=0205';
 
 // 辅助函数：将Base64数据转换为Blob
@@ -50,48 +50,9 @@ class App {
         await this.checkMicrophoneAvailability();
         // 检查摄像头可用性
         this.checkCameraAvailability();
-        // 初始化Live2D
-        await this.initLive2D();
         // 初始化摄像头
         this.initCamera();
-        // 关闭加载loading
-        this.setModelLoadingStatus(false);
         log('应用初始化完成', 'success');
-    }
-
-    // 初始化Live2D
-    async initLive2D() {
-        try {
-            // 检查Live2DManager是否已加载
-            if (typeof window.Live2DManager === 'undefined') {
-                throw new Error('Live2DManager未加载，请检查脚本引入顺序');
-            }
-            this.live2dManager = new window.Live2DManager();
-            await this.live2dManager.initializeLive2D();
-            // 更新UI状态
-            const live2dStatus = document.getElementById('live2dStatus');
-            if (live2dStatus) {
-                live2dStatus.textContent = '● 已加载';
-                live2dStatus.className = 'status loaded';
-            }
-            log('Live2D初始化完成', 'success');
-        } catch (error) {
-            log(`Live2D初始化失败: ${error.message}`, 'error');
-            // 更新UI状态
-            const live2dStatus = document.getElementById('live2dStatus');
-            if (live2dStatus) {
-                live2dStatus.textContent = '● 加载失败';
-                live2dStatus.className = 'status error';
-            }
-        }
-    }
-
-    // 设置model加载状态
-    setModelLoadingStatus(isLoading) {
-        const modelLoading = document.getElementById('modelLoading');
-        if (modelLoading) {
-            modelLoading.style.display = isLoading ? 'flex' : 'none';
-        }
     }
 
     /**

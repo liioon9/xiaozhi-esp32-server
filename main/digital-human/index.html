@@ -4,8 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>小智数字人页面</title>
-    <link rel="stylesheet" href="css/index.css?v=1025">
+    <meta name="description" content="用于验证小智服务连接、文本、音频、摄像头和 MCP 工具的测试页面。">
+    <title>小智服务测试</title>
+    <link rel="stylesheet" href="css/index.css?v=1026">
     <script>
         // 检测是否使用file://协议打开
         if (window.location.protocol === 'file:') {
@@ -37,13 +38,23 @@
 </head>
 
 <body>
-    <!-- 背景容器 -->
-    <div class="background-container" id="backgroundContainer">
-        <div class="background-overlay"></div>
-    </div>
-
     <!-- 主容器 -->
-    <div class="container">
+    <main class="container">
+
+        <header class="page-header">
+            <div>
+                <p class="page-kicker">XIAOZHI SERVER</p>
+                <h1>服务测试</h1>
+                <p class="page-description">验证连接、文本、音频、摄像头与 MCP 工具。</p>
+            </div>
+
+            <div class="connection-status-top">
+                <div class="status-indicator">
+                    <span class="status-dot status-disconnected"></span>
+                    <span id="connectionStatus">离线</span>
+                </div>
+            </div>
+        </header>
 
         <!-- 摄像头显示区域（可拖动） -->
         <div class="camera-container" id="cameraContainer">
@@ -58,33 +69,10 @@
             </div>
         </div>
 
-        <!-- 连接状态指示器 - 页面顶部中部 -->
-        <div class="connection-status-top">
-            <div class="status-indicator">
-                <span class="status-dot status-disconnected"></span>
-                <span id="connectionStatus">离线</span>
-            </div>
-        </div>
-
-        <!-- 模型加载提示 -->
-        <div class="model-container">
-            <div class="model-loading" id="modelLoading">
-                <div class="loading-char-float">
-                    <div class="main-char">
-                        <span>模</span><span>型</span><span>加</span><span>载</span><span>中</span><span>✨</span>
-                    </div>
-                    <div class="shadow-char">模型加载中✨</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Live2D Canvas 容器 -->
-        <canvas id="live2d-stage"></canvas>
-
-        <!-- 聊天消息流（弹幕样式） -->
+        <!-- 测试消息区 -->
         <div class="chat-container">
             <div class="chat-stream" id="chatStream">
-                <!-- 聊天消息将动态插入这里 -->
+                <div class="chat-empty">连接服务器后，可在此查看测试消息。</div>
             </div>
             <div class="media-player-panel" id="mediaPlayerPanel" hidden>
                 <div class="media-player-title" id="mediaPlayerTitle">网易云音乐</div>
@@ -129,7 +117,7 @@
                 <span class="btn-text">录音</span>
             </button>
         </div>
-    </div>
+    </main>
 
     <!-- 设置弹窗 -->
     <div class="modal" id="settingsModal">
@@ -143,7 +131,6 @@
                     <button class="tab-btn active" data-tab="device">设备配置</button>
                     <button class="tab-btn" data-tab="wakeword">唤醒词</button>
                     <button class="tab-btn" data-tab="mcp">MCP工具</button>
-                    <button class="tab-btn" data-tab="other">数字人皮肤</button>
                 </div>
 
                 <div class="tab-content active" id="deviceTab">
@@ -248,33 +235,6 @@
                     </div>
                 </div>
 
-                <div class="tab-content" id="otherTab">
-                    <div class="other-settings-panel">
-                        <div class="control-panel">
-                            <div class="config-row">
-                                <div class="config-item">
-                                    <label>选择模型:</label>
-                                    <select id="live2dModelSelect" class="model-select">
-                                        <option value="hiyori_pro_zh">hiyori (春日)</option>
-                                        <option value="natori_pro_zh">natori (名取)</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="config-row">
-                                <div class="config-item">
-                                    <label></label>
-                                    <button class="background-btn" id="backgroundBtn" title="切换背景">
-                                        <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                                            <path
-                                                d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15V18M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z" />
-                                        </svg>
-                                        <span class="btn-text">切换背景</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
@@ -384,24 +344,11 @@
         </div>
     </div>
 
-    <!-- 背景加载 -->
-    <script src="js/ui/background-load.js?v=0205"></script>
-
-    <!-- PIXI.js 2D渲染引擎 -->
-    <script src="js/live2d/pixi.js?v=0205"></script>
-
-    <!-- Live2D Cubism 4.0 SDK -->
-    <script src="js/live2d/live2dcubismcore.min.js?v=0205"></script>
-    <script src="js/live2d/cubism4.min.js?v=0205"></script>
-
-    <!-- Live2D 管理器 -->
-    <script src="js/live2d/live2d.js?v=0205"></script>
-
     <!-- Opus解码库 -->
     <script src="js/utils/libopus.js?v=0205"></script>
 
     <!-- 主应用入口 -->
-    <script type="module" src="js/app.js?v=1025"></script>
+    <script type="module" src="js/app.js?v=1026"></script>
 
     <!-- 全局错误处理 -->
     <script>

@@ -441,6 +441,8 @@ class UIController {
         const chatStream = document.getElementById('chatStream');
         if (!chatStream) return;
 
+        chatStream.querySelector('.chat-empty')?.remove();
+
         const messageDiv = document.createElement('div');
         messageDiv.className = `chat-message ${isUser ? 'user' : 'ai'}`;
         messageDiv.innerHTML = `<div class="message-bubble">${content}</div>`;
