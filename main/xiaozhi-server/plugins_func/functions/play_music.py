@@ -34,7 +34,7 @@ play_music_function_desc = {
     "type": "function",
     "function": {
         "name": "play_music",
-        "description": "播放音乐。必须用 mode 明确选择操作，不能把操作类型写进 query：指定歌曲用 song，播放某艺人的歌曲用 artist，每日推荐用 daily，心动模式用 heartbeat，红心收藏用 favorite，随机播放用 random。song 和 artist 必须提供 query。",
+        "description": "开始一个新的音乐播放队列。必须用 mode 明确选择操作，不能把操作类型写进 query：指定歌曲用 song，播放某艺人的歌曲用 artist，每日推荐用 daily，心动模式用 heartbeat，红心收藏用 favorite。用户说随机播放、顺序播放、循环播放、单曲循环时，必须调用 control_music，不能调用本工具。song 和 artist 必须提供 query。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -46,7 +46,6 @@ play_music_function_desc = {
                         "daily",
                         "heartbeat",
                         "favorite",
-                        "random",
                     ],
                     "description": "明确的播放操作类型。",
                 },
@@ -64,7 +63,7 @@ control_music_function_desc = {
     "type": "function",
     "function": {
         "name": "control_music",
-        "description": "当用户要求控制当前音乐播放时调用。支持暂停、继续、停止、上一首、下一首，以及切换顺序播放、列表循环、单曲循环和随机播放模式。",
+        "description": "当用户要求控制当前音乐播放时调用。用户说随机播放、顺序播放、列表循环、单曲循环时，必须调用本工具以切换当前队列的播放模式，而不是重新调用 play_music。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -83,7 +82,7 @@ control_music_function_desc = {
                     "favorite",
                     "unfavorite",
                     ],
-                    "description": "暂停为 pause，继续或恢复为 resume，停止为 stop，上一首为 previous，下一首、换一首或切歌为 next。顺序播放为 sequence，列表循环为 repeat_all，单曲循环为 repeat_one，随机播放为 shuffle。收藏当前歌曲为 favorite，取消收藏为 unfavorite。",
+            "description": "暂停为 pause，继续或恢复为 resume，停止为 stop，上一首为 previous，下一首、换一首或切歌为 next。顺序播放为 sequence，列表循环为 repeat_all，单曲循环为 repeat_one，随机播放或开启随机为 shuffle。收藏当前歌曲为 favorite，取消收藏为 unfavorite。",
                 }
             },
             "required": ["action"],
@@ -101,7 +100,6 @@ async def play_music(conn: "ConnectionHandler", mode: str, query: str = ""):
             "daily",
             "heartbeat",
             "favorite",
-            "random",
         }:
             raise NeteaseCliError("不支持的音乐播放模式")
         if mode in {"song", "artist"} and not query.strip():
@@ -113,8 +111,6 @@ async def play_music(conn: "ConnectionHandler", mode: str, query: str = ""):
             await play_netease_music(conn, mode, query.strip())
         elif mode == "song":
             await handle_music_command(conn, f"播放音乐 {query.strip()}")
-        elif mode == "random":
-            await play_local_music(conn)
         else:
             raise NeteaseCliError("当前音乐源不支持该播放模式")
         return ActionResponse(
@@ -349,8 +345,6 @@ async def play_netease_music(conn: "ConnectionHandler", mode: str, query: str = 
         if not query:
             raise NeteaseCliError("请告诉我想播放的歌曲名称")
         tracks = await provider.search(query)
-    elif mode == "random":
-        tracks = await provider.daily()
     else:
         raise NeteaseCliError("不支持的网易云音乐播放模式")
 

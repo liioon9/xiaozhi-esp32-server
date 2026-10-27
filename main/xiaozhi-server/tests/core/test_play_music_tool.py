@@ -14,7 +14,7 @@ class PlayMusicToolTest(unittest.TestCase):
         self.assertEqual(parameters["required"], ["mode"])
         self.assertEqual(
             parameters["properties"]["mode"]["enum"],
-            ["song", "artist", "daily", "heartbeat", "favorite", "random"],
+            ["song", "artist", "daily", "heartbeat", "favorite"],
         )
         self.assertIn("query", parameters["properties"])
         self.assertNotIn("song_name", parameters["properties"])
@@ -47,6 +47,14 @@ class PlayMusicToolTest(unittest.TestCase):
 
         provider.search.assert_awaited_once_with("晴天")
         self.assertEqual(result.response, "正在为您播放音乐")
+
+    def test_shuffle_is_a_music_control_action(self):
+        conn = SimpleNamespace(logger=Mock())
+
+        result = asyncio.run(music_plugin.control_music(conn, action="shuffle"))
+
+        self.assertEqual(conn.music_play_mode, "shuffle")
+        self.assertEqual(result.response, "好的，已开启随机播放。")
 
 
 if __name__ == "__main__":
