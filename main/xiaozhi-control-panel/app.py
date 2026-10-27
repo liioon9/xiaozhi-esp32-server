@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import time
 from datetime import datetime
+from io import StringIO
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -24,6 +25,8 @@ from ruamel.yaml import YAML
 ALLOWED_SERVICES = {"xiaozhi-server", "ncm-api"}
 ALLOWED_LEVELS = {"standard", "higher", "exhigh", "lossless", "hires", "jyeffect", "sky", "jymaster"}
 QR_TTL_SECONDS = 300
+REDACTED = "<REDACTED>"
+SENSITIVE_KEY_MARKERS = ("api_key", "secret", "token", "password", "authorization", "cookie", "credential", "private_key")
 
 
 class ControlPanel:
@@ -55,6 +58,55 @@ class ControlPanel:
             temp_name = file.name
         os.chmod(temp_name, 0o600)
         os.replace(temp_name, self.config_path)
+
+    @staticmethod
+    def _is_sensitive_key(key):
+        normalized = str(key).lower()
+        if normalized.endswith("_env"):
+            return False
+        return normalized == "mcp_endpoint" or any(marker in normalized for marker in SENSITIVE_KEY_MARKERS)
+
+    def _redact_config(self, value, key=None):
+        if key is not None and self._is_sensitive_key(key):
+            return REDACTED
+        if isinstance(value, dict):
+            return {item_key: self._redact_config(item_value, item_key) for item_key, item_value in value.items()}
+        if isinstance(value, list):
+            return [self._redact_config(item) for item in value]
+        return value
+
+    def _restore_redacted_values(self, submitted, existing):
+        if submitted == REDACTED and existing is not None:
+            return existing
+        if isinstance(submitted, dict):
+            existing = existing if isinstance(existing, dict) else {}
+            return {
+                key: self._restore_redacted_values(value, existing.get(key))
+                for key, value in submitted.items()
+            }
+        if isinstance(submitted, list):
+            existing = existing if isinstance(existing, list) else []
+            return [
+                self._restore_redacted_values(value, existing[index] if index < len(existing) else None)
+                for index, value in enumerate(submitted)
+            ]
+        return submitted
+
+    def get_redacted_config_text(self):
+        stream = StringIO()
+        self.yaml.dump(self._redact_config(self._load_config()), stream)
+        return stream.getvalue()
+
+    def update_config_text(self, text):
+        if not isinstance(text, str) or len(text) > 1024 * 1024:
+            raise ValueError("配置内容无效")
+        try:
+            submitted = self.yaml.load(text) or {}
+        except Exception as error:
+            raise ValueError("YAML 格式无效") from error
+        if not isinstance(submitted, dict):
+            raise ValueError("配置根节点必须是对象")
+        self._save_config(self._restore_redacted_values(submitted, self._load_config()))
 
     @staticmethod
     def _music_config(config):
@@ -220,6 +272,19 @@ def create_app(panel):
     async def get_music_config(_request):
         return json_response(panel.get_music_config())
 
+    async def get_config(_request):
+        return json_response({"yaml": panel.get_redacted_config_text()})
+
+    async def put_config(request):
+        try:
+            panel.update_config_text((await request.json()).get("yaml"))
+            panel.restart_service("xiaozhi-server")
+            return json_response({"ok": True})
+        except (ValueError, json.JSONDecodeError):
+            return json_response({"error": "配置格式无效，未保存任何更改"}, 400)
+        except subprocess.CalledProcessError:
+            return json_response({"error": "配置已保存，但重启服务失败"}, 500)
+
     async def put_music_config(request):
         try:
             panel.update_music_config(await request.json())
@@ -265,6 +330,8 @@ def create_app(panel):
     app.router.add_get("/api/status", status)
     app.router.add_get("/api/music-config", get_music_config)
     app.router.add_put("/api/music-config", put_music_config)
+    app.router.add_get("/api/config", get_config)
+    app.router.add_put("/api/config", put_config)
     app.router.add_post("/api/services/{service}/restart", restart_service)
     app.router.add_post("/api/netease/qr/start", start_qr)
     app.router.add_post("/api/netease/qr/poll", poll_qr)
