@@ -117,20 +117,19 @@ class NeteaseApiEnhancedProvider:
                 return playlist.get("id")
         raise NeteaseCliError("没有获取到红心歌单")
 
-    async def _song_details(self, song_ids):
-        if not song_ids:
-            return []
-        payload = await self._request("song/detail", ids=",".join(map(str, song_ids)))
-        return self._normalize_tracks(payload.get("songs", []))
+    async def favorite_tracks(self, limit=1000):
+        """Return the red-heart playlist in the order shown by NetEase Cloud Music.
 
-    async def favorite_tracks(self, limit=100):
-        user_id = await self._user_id()
-        payload = await self._request("likelist", uid=user_id)
-        song_ids = payload.get("ids") or []
-        tracks = []
-        for start in range(0, min(len(song_ids), limit), 50):
-            tracks.extend(await self._song_details(song_ids[start : start + 50]))
-        return tracks
+        ``likelist`` is only an ID set/list and does not model the user's
+        playlist ordering. ``playlist/track/all`` instead starts from the
+        playlist's ordered ``trackIds`` list, so queue indexes map to the
+        same next/previous order as the NetEase client.
+        """
+        playlist_id = await self.favorite_playlist_id()
+        payload = await self._request(
+            "playlist/track/all", id=playlist_id, limit=limit, offset=0
+        )
+        return self._normalize_tracks(self._extract_tracks(payload))[:limit]
 
     async def search_artist_tracks(self, artist_name, limit=30):
         payload = await self._request("search", keywords=artist_name, limit=1, type=100)

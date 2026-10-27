@@ -79,6 +79,38 @@ class NeteaseApiEnhancedProviderTest(unittest.TestCase):
         with self.assertRaisesRegex(NeteaseCliError, "没有获取到可播放地址"):
             asyncio.run(provider.resolve_play_url({"id": "1", "originalId": 1}))
 
+    def test_favorite_tracks_keeps_red_heart_playlist_order(self):
+        provider = NeteaseApiEnhancedProvider(self.config)
+        provider._request = AsyncMock(
+            side_effect=[
+                {"code": 200, "profile": {"userId": 1}},
+                {
+                    "code": 200,
+                    "playlist": [{"id": 99, "specialType": 5}],
+                },
+                {
+                    "code": 200,
+                    "songs": [
+                        {"id": 30, "name": "第三首", "ar": []},
+                        {"id": 10, "name": "第一首", "ar": []},
+                        {"id": 20, "name": "第二首", "ar": []},
+                    ],
+                },
+            ]
+        )
+
+        tracks = asyncio.run(provider.favorite_tracks(limit=3))
+
+        self.assertEqual([track["originalId"] for track in tracks], [30, 10, 20])
+        self.assertEqual(
+            provider._request.await_args_list[-1].args,
+            ("playlist/track/all",),
+        )
+        self.assertEqual(
+            provider._request.await_args_list[-1].kwargs,
+            {"id": 99, "limit": 3, "offset": 0},
+        )
+
     def test_request_sends_cookie_from_environment_only_in_header(self):
         provider = NeteaseApiEnhancedProvider(self.config)
 
