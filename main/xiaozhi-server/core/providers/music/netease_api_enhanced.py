@@ -26,14 +26,13 @@ class NeteaseApiEnhancedProvider:
             raise NeteaseCliError("未配置网易云 API Enhanced 地址")
 
         cookie = os.environ.get(self.cookie_env)
-        if cookie:
-            params["cookie"] = cookie
+        headers = {"Cookie": cookie} if cookie else None
 
         url = f"{self.base_url}/{path.lstrip('/')}"
         timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url, params=params) as response:
+                async with session.get(url, params=params, headers=headers) as response:
                     payload = await response.json(content_type=None)
                     if response.status >= 400:
                         message = payload.get("message") if isinstance(payload, dict) else ""

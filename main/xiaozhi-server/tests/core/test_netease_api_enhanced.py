@@ -79,7 +79,7 @@ class NeteaseApiEnhancedProviderTest(unittest.TestCase):
         with self.assertRaisesRegex(NeteaseCliError, "没有获取到可播放地址"):
             asyncio.run(provider.resolve_play_url({"id": "1", "originalId": 1}))
 
-    def test_request_reads_cookie_only_from_environment(self):
+    def test_request_sends_cookie_from_environment_only_in_header(self):
         provider = NeteaseApiEnhancedProvider(self.config)
 
         with patch.dict(os.environ, {"NETEASE_COOKIE": "test-cookie"}, clear=False), patch(
@@ -96,7 +96,10 @@ class NeteaseApiEnhancedProviderTest(unittest.TestCase):
 
         self.assertEqual(
             session.get.call_args.kwargs["params"],
-            {"keywords": "test", "cookie": "test-cookie"},
+            {"keywords": "test"},
+        )
+        self.assertEqual(
+            session.get.call_args.kwargs["headers"], {"Cookie": "test-cookie"}
         )
 
 
