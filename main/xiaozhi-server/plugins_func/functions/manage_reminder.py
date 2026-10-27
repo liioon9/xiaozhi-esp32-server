@@ -1,4 +1,24 @@
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
+from datetime import datetime
+
+
+def _friendly_once_time(value: str) -> str:
+    target = datetime.fromisoformat(value)
+    now = datetime.now(target.tzinfo)
+    day_offset = (target.date() - now.date()).days
+    if day_offset == 0:
+        day = "今天"
+    elif day_offset == 1:
+        day = "明天"
+    else:
+        day = f"{target.month}月{target.day}日"
+    minute = f"{target.minute:02d}分" if target.minute else ""
+    return f"{day}{target.hour}点{minute}"
+
+
+def _friendly_daily_time(value: str) -> str:
+    hour, minute = (int(part) for part in value.split(":", 1))
+    return f"每天{hour}点{f'{minute:02d}分' if minute else ''}"
 
 
 manage_reminder_function_desc = {
@@ -32,16 +52,16 @@ async def manage_reminder(conn, action: str, message: str = "", run_at: str = ""
     try:
         if action == "create_once":
             reminder = service.create_once(message, run_at)
-            return ActionResponse(Action.RESPONSE, response=f"好的，我会在 {reminder['next_run_at']} 提醒你：{reminder['message']}。")
+            return ActionResponse(Action.RESPONSE, response=f"好的，我会在{_friendly_once_time(reminder['next_run_at'])}提醒你：{reminder['message']}。")
         if action == "create_daily":
             reminder = service.create_daily(message, time)
-            return ActionResponse(Action.RESPONSE, response=f"好的，我会每天 {reminder['time_of_day']} 提醒你：{reminder['message']}。")
+            return ActionResponse(Action.RESPONSE, response=f"好的，我会{_friendly_daily_time(reminder['time_of_day'])}提醒你：{reminder['message']}。")
         if action == "list":
             reminders = service.list()
             if not reminders:
                 return ActionResponse(Action.RESPONSE, response="当前没有待执行的提醒。")
             text = "；".join(
-                f"{item['id']}：{'每天 ' + item['time_of_day'] if item['schedule_type'] == 'daily' else item['next_run_at']}，{item['message']}"
+                f"{_friendly_daily_time(item['time_of_day']) if item['schedule_type'] == 'daily' else _friendly_once_time(item['next_run_at'])}，提醒{item['message']}"
                 for item in reminders[:5]
             )
             return ActionResponse(Action.RESPONSE, response=f"当前提醒有：{text}。")
