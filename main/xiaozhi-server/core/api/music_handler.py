@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from aiohttp import web
-from core.providers.music.netease_cli import NeteaseCliProvider
+from core.providers.music.netease_provider import create_netease_provider
 
 
 DEFAULT_MUSIC_EXTENSIONS = (".mp3", ".wav", ".p3", ".ogg", ".opus")
@@ -173,7 +173,7 @@ class MusicStreamHandler:
     def __init__(self, config, logger):
         self.config = config
         self.logger = logger
-        self.netease = NeteaseCliProvider(config)
+        self.netease = create_netease_provider(config)
 
     async def handle_get(self, request):
         track_id = request.match_info["track_id"]

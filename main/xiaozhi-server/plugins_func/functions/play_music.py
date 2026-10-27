@@ -16,9 +16,9 @@ from core.api.music_handler import (
 )
 from core.providers.music.netease_cli import (
     NeteaseCliError,
-    NeteaseCliProvider,
     first_playable,
 )
+from core.providers.music.netease_provider import create_netease_provider
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType, ContentType
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from typing import TYPE_CHECKING
@@ -192,7 +192,7 @@ async def control_music(conn: "ConnectionHandler", action: str):
             )
         provider = MUSIC_CACHE.get("netease_provider")
         if provider is None:
-            provider = NeteaseCliProvider(conn.config)
+            provider = create_netease_provider(conn.config)
             MUSIC_CACHE["netease_provider"] = provider
         track = queue[index]
         if action == "favorite":
@@ -320,7 +320,7 @@ async def handle_music_command(conn: "ConnectionHandler", text):
 async def play_netease_music(conn: "ConnectionHandler", mode: str, query: str = ""):
     provider = MUSIC_CACHE.get("netease_provider")
     if provider is None:
-        provider = NeteaseCliProvider(conn.config)
+        provider = create_netease_provider(conn.config)
         MUSIC_CACHE["netease_provider"] = provider
 
     if mode == "daily":
