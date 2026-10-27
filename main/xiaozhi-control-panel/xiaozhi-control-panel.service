@@ -1,0 +1,18 @@
+[Unit]
+Description=Xiaozhi local control panel
+Wants=network-online.target
+After=network-online.target ncm-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/xiaozhi-esp32-server/main/xiaozhi-control-panel
+ExecStart=/home/miniconda3/envs/xiaozhi-esp32-server/bin/python app.py --host 127.0.0.1 --port 8090
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

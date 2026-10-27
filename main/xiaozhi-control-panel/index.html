@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小智控制台</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif; color: #1f2937; background: #f3f6fb; }
+    body { margin: 0; } main { max-width: 820px; margin: 0 auto; padding: 32px 18px 56px; }
+    h1 { margin: 0 0 8px; } .hint { color: #64748b; margin: 0 0 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; box-shadow: 0 1px 3px #0f172a0d; }
+    h2 { font-size: 18px; margin: 0 0 14px; } label { display: block; font-size: 14px; margin: 12px 0 5px; }
+    input, select, button { box-sizing: border-box; font: inherit; border-radius: 7px; } input, select { width: 100%; padding: 9px; border: 1px solid #cbd5e1; }
+    button { border: 0; background: #2563eb; color: #fff; padding: 9px 13px; cursor: pointer; margin: 8px 8px 0 0; } button.danger { background: #dc2626; } button.secondary { background: #475569; }
+    .status { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid #eef2f7; }
+    .badge { padding: 3px 8px; border-radius: 99px; background: #fee2e2; color: #991b1b; font-size: 13px; } .badge.ok { background: #dcfce7; color: #166534; }
+    #qr { width: 180px; display: none; margin: 12px 0; } #notice { min-height: 24px; margin: 18px 0 0; color: #0369a1; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>小智控制台</h1>
+    <p class="hint">此页面仅应通过服务器本机或 SSH 隧道访问。网易云登录信息不会显示在页面中。</p>
+    <div class="grid">
+      <section>
+        <h2>服务状态</h2>
+        <div class="status"><span>xiaozhi-server</span><span id="xiaozhi-state" class="badge">读取中</span></div>
+        <div class="status"><span>ncm-api</span><span id="ncm-state" class="badge">读取中</span></div>
+        <button class="secondary" onclick="restartService('xiaozhi-server')">重启小智服务</button>
+        <button class="secondary" onclick="restartService('ncm-api')">重启网易云 API</button>
+      </section>
+      <section>
+        <h2>网易云音乐</h2>
+        <p>绑定状态：<span id="binding" class="badge">读取中</span></p>
+        <button onclick="startQr()">绑定 / 重新绑定</button>
+        <button class="danger" onclick="unbind()">解除绑定</button>
+        <img id="qr" alt="网易云登录二维码">
+        <p id="qr-tip"></p>
+      </section>
+      <section>
+        <h2>音乐配置</h2>
+        <label>音乐来源<select id="source"><option value="netease">网易云音乐</option><option value="local">本地音乐库</option></select></label>
+        <label>播放服务地址<input id="api-base-url" inputmode="url"></label>
+        <label>请求超时（秒）<input id="api-timeout" type="number" min="1" max="60"></label>
+        <label>音质<select id="play-level"><option value="standard">标准</option><option value="higher">较高</option><option value="exhigh">极高</option><option value="lossless">无损</option><option value="hires">Hi-Res</option><option value="jyeffect">高清环绕声</option><option value="sky">沉浸环绕声</option><option value="jymaster">超清母带</option></select></label>
+        <button onclick="saveMusicConfig()">保存并重启小智服务</button>
+      </section>
+    </div>
+    <p id="notice"></p>
+  </main>
+  <script>
+    let pollTimer;
+    const notice = message => document.querySelector('#notice').textContent = message;
+    const request = async (url, options = {}) => { const response = await fetch(url, options); const data = await response.json(); if (!response.ok) throw new Error(data.error || '操作失败'); return data; };
+    const setBadge = (selector, value) => { const element = document.querySelector(selector); element.textContent = value; element.className = `badge ${value === 'active' || value === '已绑定' ? 'ok' : ''}`; };
+    async function loadStatus() { try { const data = await request('/api/status'); setBadge('#xiaozhi-state', data.services['xiaozhi-server']); setBadge('#ncm-state', data.services['ncm-api']); setBadge('#binding', data.netease_bound ? '已绑定' : '未绑定'); document.querySelector('#source').value = data.music.source; document.querySelector('#api-base-url').value = data.music.api_base_url; document.querySelector('#api-timeout').value = data.music.api_timeout_seconds; document.querySelector('#play-level').value = data.music.play_level; } catch (error) { notice(error.message); } }
+    async function restartService(service) { try { await request(`/api/services/${service}/restart`, { method: 'POST' }); notice('服务已重启。'); await loadStatus(); } catch (error) { notice(error.message); } }
+    async function startQr() { try { clearInterval(pollTimer); const data = await request('/api/netease/qr/start', { method: 'POST' }); const qr = document.querySelector('#qr'); qr.src = data.qrimg; qr.style.display = 'block'; document.querySelector('#qr-tip').textContent = '请使用网易云音乐 App 扫码确认。'; pollTimer = setInterval(pollQr, 1800); } catch (error) { notice(error.message); } }
+    async function pollQr() { try { const data = await request('/api/netease/qr/poll', { method: 'POST' }); if (data.state === 'bound') { clearInterval(pollTimer); document.querySelector('#qr').style.display = 'none'; document.querySelector('#qr-tip').textContent = ''; notice('网易云已绑定，小智服务已重启。'); await loadStatus(); } else if (data.state === 'expired') { clearInterval(pollTimer); notice('二维码已过期，请重新生成。'); } } catch (error) { clearInterval(pollTimer); notice(error.message); } }
+    async function unbind() { if (!confirm('确定解除网易云绑定吗？')) return; try { await request('/api/netease/unbind', { method: 'POST' }); notice('已解除绑定，小智服务已重启。'); await loadStatus(); } catch (error) { notice(error.message); } }
+    async function saveMusicConfig() { try { await request('/api/music-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: document.querySelector('#source').value, provider: 'api_enhanced', api_base_url: document.querySelector('#api-base-url').value, api_timeout_seconds: Number(document.querySelector('#api-timeout').value), play_level: document.querySelector('#play-level').value }) }); notice('配置已保存，小智服务已重启。'); await loadStatus(); } catch (error) { notice(error.message); } }
+    loadStatus();
+  </script>
+</body>
+</html>
