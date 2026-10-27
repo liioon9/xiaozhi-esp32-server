@@ -102,6 +102,8 @@ class ConnectionHandler:
         self.read_config_from_api = self.config.get("read_config_from_api", False)
 
         self.websocket: websockets.ServerConnection | None = None
+        self.reminder_standby_active = False
+        self.reminder_lock = asyncio.Lock()
         self.headers = None
         self.device_id = None
         self.client_ip = None
@@ -222,6 +224,8 @@ class ConnectionHandler:
 
             # 认证通过,继续处理
             self.websocket = ws
+            if self.server:
+                self.server.register_connection(self)
 
             # 检查是否来自MQTT连接
             request_path = ws.request.path
@@ -263,6 +267,8 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"Connection error: {str(e)}-{stack_trace}")
             return
         finally:
+            if self.server:
+                self.server.unregister_connection(self)
             try:
                 await self._save_and_close(ws)
             except Exception as final_error:
@@ -333,6 +339,28 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).error(
                     f"保存记忆后关闭连接失败: {close_error}"
                 )
+
+    async def deliver_reminder(self, message: str) -> bool:
+        """Speak persisted reminder text without invoking the LLM."""
+        if not self.tts or not self.websocket or not self.reminder_standby_active:
+            return False
+        async with self.reminder_lock:
+            sentence_id = str(uuid.uuid4().hex)
+            self.sentence_id = sentence_id
+            self.client_abort = False
+            text = f"提醒你：{message}"
+            self.tts.store_tts_text(sentence_id, text)
+            self.tts.tts_text_queue.put(
+                TTSMessageDTO(sentence_id=sentence_id, sentence_type=SentenceType.FIRST, content_type=ContentType.ACTION)
+            )
+            self.tts.tts_text_queue.put(
+                TTSMessageDTO(sentence_id=sentence_id, sentence_type=SentenceType.MIDDLE, content_type=ContentType.TEXT, content_detail=text)
+            )
+            self.tts.tts_text_queue.put(
+                TTSMessageDTO(sentence_id=sentence_id, sentence_type=SentenceType.LAST, content_type=ContentType.ACTION)
+            )
+        self.logger.bind(tag=TAG).info(f"已下发提醒播报: {message}")
+        return True
 
     async def _discard_message_with_bind_prompt(self):
         """丢弃消息并检查是否需要播放绑定提示"""

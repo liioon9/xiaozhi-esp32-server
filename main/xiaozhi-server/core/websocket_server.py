@@ -59,6 +59,8 @@ class WebSocketServer:
         self._llm = modules["llm"] if "llm" in modules else None
         self._intent = modules["intent"] if "intent" in modules else None
         self._memory = modules["memory"] if "memory" in modules else None
+        self.active_connections = {}
+        self.reminder_service = None
 
         auth_config = self.config["server"].get("auth", {})
         self.auth_enable = auth_config.get("enabled", False)
@@ -67,6 +69,20 @@ class WebSocketServer:
         secret_key = self.config["server"]["auth_key"]
         expire_seconds = auth_config.get("expire_seconds", None)
         self.auth = AuthManager(secret_key=secret_key, expire_seconds=expire_seconds)
+
+    def register_connection(self, handler):
+        self.active_connections[handler.session_id] = handler
+
+    def unregister_connection(self, handler):
+        self.active_connections.pop(handler.session_id, None)
+
+    def get_reminder_connection(self):
+        """Return the newest physical client that explicitly keeps standby alive."""
+        candidates = [
+            item for item in self.active_connections.values()
+            if getattr(item, "reminder_standby_active", False) and item.tts is not None
+        ]
+        return max(candidates, key=lambda item: item.last_activity_time, default=None)
 
     async def start(self):
         server_config = self.config["server"]

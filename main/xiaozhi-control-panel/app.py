@@ -10,13 +10,15 @@ import asyncio
 from copy import deepcopy
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from aiohttp import web
@@ -277,6 +279,108 @@ class ControlPanel:
         netease["play_level"] = play_level
         self._save_config(config)
 
+    def _reminder_database_path(self):
+        path = Path(self._effective_config().get("reminders", {}).get("database_path", "data/reminders.sqlite3"))
+        return path if path.is_absolute() else self.base_config_path.parent / path
+
+    def _reminder_connection(self):
+        path = self._reminder_database_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("""CREATE TABLE IF NOT EXISTS reminders (
+            id TEXT PRIMARY KEY, message TEXT NOT NULL, schedule_type TEXT NOT NULL,
+            timezone TEXT NOT NULL, time_of_day TEXT, next_run_at INTEGER NOT NULL,
+            last_run_at INTEGER, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)""")
+        return connection
+
+    @staticmethod
+    def _reminder_row(row):
+        item = dict(row)
+        timezone = ZoneInfo(item["timezone"])
+        for key in ("next_run_at", "last_run_at", "created_at", "updated_at"):
+            if item.get(key) is not None:
+                item[key] = datetime.fromtimestamp(item[key], timezone).isoformat()
+        return item
+
+    def list_reminders(self):
+        connection = self._reminder_connection()
+        try:
+            rows = connection.execute("SELECT * FROM reminders WHERE status != 'completed' ORDER BY next_run_at").fetchall()
+            return [self._reminder_row(row) for row in rows]
+        finally:
+            connection.close()
+
+    def create_reminder(self, values):
+        if not isinstance(values, dict):
+            raise ValueError("提醒数据无效")
+        message = values.get("message", "").strip() if isinstance(values.get("message"), str) else ""
+        if not message or len(message) > 300:
+            raise ValueError("提醒内容不能为空，且不能超过 300 个字符")
+        schedule_type = values.get("schedule_type")
+        timezone = self._effective_config().get("reminders", {}).get("timezone", "Asia/Shanghai")
+        tz = ZoneInfo(timezone)
+        time_of_day = None
+        if schedule_type == "once":
+            try:
+                target = datetime.fromisoformat(values.get("run_at", ""))
+            except ValueError as error:
+                raise ValueError("一次性提醒时间格式无效") from error
+            target = target.replace(tzinfo=tz) if target.tzinfo is None else target.astimezone(tz)
+            if target <= datetime.now(tz):
+                raise ValueError("一次性提醒必须设置在未来")
+        elif schedule_type == "daily":
+            raw_time = values.get("time", "")
+            try:
+                hour, minute = (int(part) for part in raw_time.split(":", 1))
+                if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                    raise ValueError
+            except (ValueError, AttributeError) as error:
+                raise ValueError("每日提醒时间必须是 HH:MM") from error
+            time_of_day = f"{hour:02d}:{minute:02d}"
+            target = datetime.now(tz).replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if target <= datetime.now(tz):
+                target += timedelta(days=1)
+        else:
+            raise ValueError("提醒类型无效")
+        reminder_id = os.urandom(6).hex()
+        now = int(time.time())
+        connection = self._reminder_connection()
+        try:
+            connection.execute(
+                """INSERT INTO reminders (id, message, schedule_type, timezone, time_of_day, next_run_at, status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+                (reminder_id, message, schedule_type, timezone, time_of_day, int(target.timestamp()), now, now),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        return reminder_id
+
+    def update_reminder_status(self, reminder_id, status):
+        if status not in {"active", "paused"}:
+            raise ValueError("提醒状态无效")
+        connection = self._reminder_connection()
+        try:
+            result = connection.execute(
+                "UPDATE reminders SET status = ?, updated_at = ? WHERE id = ? AND status != 'completed'",
+                (status, int(time.time()), reminder_id),
+            )
+            connection.commit()
+            return result.rowcount > 0
+        finally:
+            connection.close()
+
+    def delete_reminder(self, reminder_id):
+        connection = self._reminder_connection()
+        try:
+            result = connection.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+            connection.commit()
+            return result.rowcount > 0
+        finally:
+            connection.close()
+
     def is_netease_bound(self):
         if not self.netease_env_path.exists():
             return False
@@ -400,6 +504,32 @@ def create_app(panel):
     async def get_form_config(_request):
         return json_response(panel.get_form_config())
 
+    async def get_reminders(_request):
+        return json_response({"reminders": panel.list_reminders()})
+
+    async def post_reminder(request):
+        try:
+            return json_response({"id": panel.create_reminder(await request.json())}, 201)
+        except (ValueError, json.JSONDecodeError) as error:
+            return json_response({"error": str(error)}, 400)
+
+    async def patch_reminder(request):
+        try:
+            action = (await request.json()).get("action")
+            status = "paused" if action == "pause" else "active" if action == "resume" else None
+            if status is None:
+                raise ValueError("提醒操作无效")
+            if not panel.update_reminder_status(request.match_info["reminder_id"], status):
+                return json_response({"error": "没有找到该提醒"}, 404)
+            return json_response({"ok": True})
+        except (ValueError, json.JSONDecodeError) as error:
+            return json_response({"error": str(error)}, 400)
+
+    async def delete_reminder(request):
+        if not panel.delete_reminder(request.match_info["reminder_id"]):
+            return json_response({"error": "没有找到该提醒"}, 404)
+        return json_response({"ok": True})
+
     async def put_form_config(request):
         try:
             panel.update_form_config(await request.json())
@@ -469,6 +599,10 @@ def create_app(panel):
     app.router.add_put("/api/config", put_config)
     app.router.add_get("/api/form-config", get_form_config)
     app.router.add_put("/api/form-config", put_form_config)
+    app.router.add_get("/api/reminders", get_reminders)
+    app.router.add_post("/api/reminders", post_reminder)
+    app.router.add_patch("/api/reminders/{reminder_id}", patch_reminder)
+    app.router.add_delete("/api/reminders/{reminder_id}", delete_reminder)
     app.router.add_post("/api/services/{service}/restart", restart_service)
     app.router.add_post("/api/netease/qr/start", start_qr)
     app.router.add_post("/api/netease/qr/poll", poll_qr)

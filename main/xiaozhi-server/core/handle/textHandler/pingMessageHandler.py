@@ -26,13 +26,16 @@ class PingMessageHandler(TextMessageHandler):
         # 检查是否启用了WebSocket心跳功能
         enable_websocket_ping = conn.config.get("enable_websocket_ping", False)
         is_media_keepalive = msg_json.get("purpose") == "media_playback"
-        if not enable_websocket_ping and not is_media_keepalive:
+        is_reminder_standby = msg_json.get("purpose") == "reminder_standby"
+        if not enable_websocket_ping and not is_media_keepalive and not is_reminder_standby:
             conn.logger.debug(f"WebSocket心跳功能未启用，忽略PING消息")
             return
 
         try:
             conn.logger.debug(f"收到PING消息，发送PONG响应")
             conn.last_activity_time = time.time() * 1000
+            if is_reminder_standby:
+                conn.reminder_standby_active = True
             # 构造PONG响应消息
             pong_message = {
                 "type": "pong",

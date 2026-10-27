@@ -8,6 +8,7 @@ from config.logger import setup_logging
 from core.utils.util import get_local_ip, validate_mcp_endpoint
 from core.http_server import SimpleHttpServer
 from core.websocket_server import WebSocketServer
+from core.reminder_service import ReminderService
 from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
 
@@ -70,6 +71,9 @@ async def main():
 
     # 启动 WebSocket 服务器
     ws_server = WebSocketServer(config)
+    reminder_service = ReminderService(config, ws_server)
+    ws_server.reminder_service = reminder_service
+    await reminder_service.start()
     ws_task = asyncio.create_task(ws_server.start())
     # 启动 Simple http 服务器
     ota_server = SimpleHttpServer(config)
@@ -129,6 +133,7 @@ async def main():
     finally:
         # 停止全局GC管理器
         await gc_manager.stop()
+        await reminder_service.stop()
 
         # 取消所有任务（关键修复点）
         stdin_task.cancel()

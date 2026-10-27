@@ -130,6 +130,10 @@ context_providers:
 
 # 插件的基础配置
 plugins:
+  manage_reminder:
+    # Reminder data stays on this server.  The ESP32 delivers it through its standby WebSocket.
+    enabled: true
+
   # 获取天气插件的配置，这里填写你的api_key
   # 这个密钥是项目共用的key，用多了可能会被限制
   # 想稳定一点就自行申请替换，每天有1000次免费调用
@@ -262,6 +266,13 @@ end_prompt:
   prompt: |
     请你以"时间过得真快"未来头，用富有感情、依依不舍的话来结束这场对话吧！
 
+# 单设备提醒：到点后仅向主动保持待机连接的 ESP32 下发播报。
+reminders:
+  enabled: true
+  database_path: "data/reminders.sqlite3"
+  timezone: "Asia/Shanghai"
+  poll_interval_seconds: 5
+
 # 具体处理时选择的模块(The module selected for specific processing)
 selected_module:
   # 语音活动检测模块，默认使用SileroVAD模型
@@ -304,6 +315,7 @@ Intent:
       - get_weather
       - get_news_from_newsnow
       - play_music
+      - manage_reminder
   function_call:
     # 不需要动type
     type: function_call
@@ -320,6 +332,7 @@ Intent:
       # play_music是服务器自带的音乐播放，hass_play_music是通过home assistant控制的独立外部程序音乐播放
       # 如果用了hass_play_music，就不要开启play_music，两者只留一个
       - play_music
+      - manage_reminder
       #- hass_state
       #- hass_play_music
 
